@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Xiangzi Folio 书签主页",
+  "version": "1.0.0",
+  "description": "用现代组件管理 Chrome 原生书签，支持本地缓存、导入导出和双向同步。",
+  "permissions": ["bookmarks", "storage", "favicon", "unlimitedStorage"],
+  "chrome_url_overrides": { "newtab": "index.html" },
+  "action": { "default_title": "打开 Xiangzi Folio" },
+  "background": { "service_worker": "background.js" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
