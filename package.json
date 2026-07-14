@@ -1,6 +1,6 @@
 {
   "name": "xiangzi-folio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "A local-first, Chrome bookmark powered new-tab dashboard.",

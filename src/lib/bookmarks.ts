@@ -122,18 +122,65 @@ export function normalizeUrl(value: string): string {
   return /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-export type PresentationMarker = FolderStyle | "featured" | "tile" | "compact";
-export type PresentationWidth = 2 | 3 | 4 | 6 | 8 | 9 | 12 | 16;
-const markerPattern = /\s*\[(?:folio:)?(directory|icons|mixed|dock|stack|focus|columns|featured|tile|compact|w3|w4|w6|w8|w9|w12|closed)\]\s*/gi;
-const folderStyles = new Set<FolderStyle>(["directory", "icons", "mixed", "dock", "stack", "focus", "columns"]);
+export type PresentationMarker = FolderStyle | BookmarkStyle;
+export type PresentationWidth = 1.5 | 2 | 3 | 4 | 6 | 8 | 9 | 12 | 16;
+const markerPattern = /\s*\[(?:folio:)?(directory|icons|mixed|dock|stack|focus|columns|featured|tile|compact|w1\.5|w3|w4|w6|w8|w9|w12|closed)\]\s*/gi;
 const validWidths = new Set<number>([3, 4, 6, 8, 9, 12]);
+const validBookmarkWidths = new Set<number>([1.5, 2, 3, 4, 6, 8, 12, 16]);
 const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const shortMarkerPattern = /\s*~([A-Za-z0-9_-]{2})\s*$/;
 const compactMarkerPattern = /\s*~x([AB][A-Za-z0-9_-])\s*$/;
 const bookmarkMarkerPattern = /\s*~b([AB][A-Za-z0-9_-])\s*$/;
 const styleCodes: Array<FolderStyle | undefined> = [undefined, "directory", "icons", "mixed", "dock", "stack", "focus", "columns"];
 const widthCodes: Array<PresentationWidth | undefined> = [undefined, 3, 4, 6, 8, 9, 12];
 const bookmarkStyleCodes: Array<Exclude<BookmarkStyle, "row"> | undefined> = [undefined, "tile", "featured", "dock", "compact"];
 const bookmarkWidthCodes: Array<PresentationWidth | undefined> = [undefined, 3, 4, 6, 8, 12, 2, 16];
+const shortFolderStyles: FolderStyle[] = ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"];
+const shortFolderWidths: Array<PresentationWidth | undefined> = [undefined, 3, 4, 6, 8, 9, 12];
+const shortBookmarkStyles: BookmarkStyle[] = ["row", "tile", "featured", "dock", "compact"];
+const shortBookmarkWidths: Array<PresentationWidth | undefined> = [undefined, 1.5, 2, 3, 4, 6, 8, 12, 16];
+const shortMarkerVersion = 1;
+
+type ShortPresentation = { kind: "folder" | "bookmark"; marker: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2 };
+
+function shortChecksum(payload: number, type: number, version: number) {
+  return (payload ^ (payload >> 2) ^ (payload >> 5) ^ (type * 3) ^ version) & 3;
+}
+
+function encodeShortMarker(payload: number, kind: "folder" | "bookmark") {
+  const type = kind === "bookmark" ? 1 : 0;
+  const checksum = shortChecksum(payload, type, shortMarkerVersion);
+  const word = payload | (type << 7) | (shortMarkerVersion << 8) | (checksum << 10);
+  return `~${base64Alphabet[(word >> 6) & 63]}${base64Alphabet[word & 63]}`;
+}
+
+function decodeShortMarker(value: string): ShortPresentation | undefined {
+  const match = value.match(shortMarkerPattern);
+  if (!match) return undefined;
+  const high = base64Alphabet.indexOf(match[1][0]);
+  const low = base64Alphabet.indexOf(match[1][1]);
+  if (high < 0 || low < 0) return undefined;
+  const word = (high << 6) | low;
+  const payload = word & 127;
+  const type = (word >> 7) & 1;
+  const version = (word >> 8) & 3;
+  const checksum = (word >> 10) & 3;
+  if (version !== shortMarkerVersion || checksum !== shortChecksum(payload, type, version)) return undefined;
+  if (type === 0) {
+    if (payload >= shortFolderStyles.length * shortFolderWidths.length * 2) return undefined;
+    const styleIndex = payload % shortFolderStyles.length;
+    const remainder = Math.floor(payload / shortFolderStyles.length);
+    const widthIndex = remainder % shortFolderWidths.length;
+    const collapsed = Math.floor(remainder / shortFolderWidths.length) === 1;
+    return { kind: "folder", marker: shortFolderStyles[styleIndex], width: shortFolderWidths[widthIndex], ...(collapsed ? { collapsed: true } : {}) };
+  }
+  if (payload >= shortBookmarkStyles.length * shortBookmarkWidths.length * 2) return undefined;
+  const styleIndex = payload % shortBookmarkStyles.length;
+  const remainder = Math.floor(payload / shortBookmarkStyles.length);
+  const widthIndex = remainder % shortBookmarkWidths.length;
+  const rows = (Math.floor(remainder / shortBookmarkWidths.length) + 1) as 1 | 2;
+  return { kind: "bookmark", marker: shortBookmarkStyles[styleIndex], width: shortBookmarkWidths[widthIndex], ...(rows === 2 ? { rows } : {}) };
+}
 
 function decodeCompactMarker(value: string) {
   const match = value.match(compactMarkerPattern);
@@ -150,12 +197,6 @@ function decodeCompactMarker(value: string) {
   };
 }
 
-function encodeCompactMarker(style?: FolderStyle, width?: PresentationWidth, collapsed = false) {
-  const code = styleCodes.indexOf(style) | (widthCodes.indexOf(width) << 3) | (collapsed ? 64 : 0);
-  if (!code) return "";
-  return `~x${base64Alphabet[(code >> 6) & 63]}${base64Alphabet[code & 63]}`;
-}
-
 function decodeBookmarkMarker(value: string) {
   const match = value.match(bookmarkMarkerPattern);
   if (!match) return {};
@@ -168,64 +209,68 @@ function decodeBookmarkMarker(value: string) {
   return { marker: style, width, rows: (code & 64) ? 2 as const : 1 as const };
 }
 
-function encodeBookmarkMarker(style?: BookmarkStyle, width?: PresentationWidth, rows: 1 | 2 = 1) {
-  const normalizedStyle = style === "row" ? undefined : style;
-  const code = bookmarkStyleCodes.indexOf(normalizedStyle) | (bookmarkWidthCodes.indexOf(width) << 3) | (rows === 2 ? 64 : 0);
-  if (!code) return "";
-  return `~b${base64Alphabet[(code >> 6) & 63]}${base64Alphabet[code & 63]}`;
-}
-
 export function parsePresentationTitle(value: string): { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2 } {
+  const short = decodeShortMarker(value);
   const compact = decodeCompactMarker(value);
   const bookmarkCompact = decodeBookmarkMarker(value);
   const hasCompact = !!(compact.marker || compact.width || compact.collapsed);
   const hasBookmarkCompact = !!(bookmarkCompact.marker || bookmarkCompact.width || bookmarkCompact.rows === 2);
   const tokens = Array.from(value.matchAll(markerPattern), (match) => match[1].toLowerCase());
-  if (tokens.length === 0 && !hasCompact && !hasBookmarkCompact) return { title: value };
+  if (tokens.length === 0 && !short && !hasCompact && !hasBookmarkCompact) return { title: value };
   const legacyMarker = tokens.find((token) => !token.startsWith("w") && token !== "closed") as PresentationMarker | undefined;
-  const marker = compact.marker || bookmarkCompact.marker || legacyMarker;
+  const marker = short?.marker || compact.marker || bookmarkCompact.marker || legacyMarker;
   const widthValue = Number(tokens.find((token) => token.startsWith("w"))?.slice(1));
-  const width = compact.width || bookmarkCompact.width || (validWidths.has(widthValue) ? widthValue as PresentationWidth : undefined);
-  const title = value.replace(markerPattern, " ").replace(hasCompact ? compactMarkerPattern : /$^/, "").replace(hasBookmarkCompact ? bookmarkMarkerPattern : /$^/, "").replace(/\s+/g, " ").trim() || "未命名";
-  const collapsed = compact.collapsed || tokens.includes("closed");
-  return { title, ...(marker ? { marker } : {}), ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}), ...(bookmarkCompact.rows === 2 ? { rows: 2 as const } : {}) };
+  const hasBookmarkMarker = tokens.some((token) => ["featured", "tile", "compact"].includes(token));
+  const width = short?.width || compact.width || bookmarkCompact.width || ((hasBookmarkMarker || bookmarkCompact.marker || bookmarkCompact.width || bookmarkCompact.rows) && validBookmarkWidths.has(widthValue) ? widthValue as PresentationWidth : validWidths.has(widthValue) ? widthValue as PresentationWidth : undefined);
+  const title = value.replace(markerPattern, " ").replace(short ? shortMarkerPattern : /$^/, "").replace(hasCompact ? compactMarkerPattern : /$^/, "").replace(hasBookmarkCompact ? bookmarkMarkerPattern : /$^/, "").replace(/\s+/g, " ").trim() || "未命名";
+  const collapsed = short?.collapsed || compact.collapsed || tokens.includes("closed");
+  const rows = short?.rows || bookmarkCompact.rows;
+  return { title, ...(marker ? { marker } : {}), ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}), ...(rows === 2 ? { rows } : {}) };
 }
 
-export function setFolderPresentationTitle(value: string, changes: { style?: FolderStyle | null; width?: number | null; collapsed?: boolean | null }): string {
-  const parsed = parsePresentationTitle(value);
-  const currentStyle = parsed.marker && folderStyles.has(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : undefined;
-  const style = changes.style === undefined ? currentStyle : changes.style || undefined;
-  const requestedWidth = changes.width === undefined ? parsed.width : changes.width;
-  const width = requestedWidth && validWidths.has(requestedWidth) ? requestedWidth as PresentationWidth : undefined;
-  const collapsed = changes.collapsed === undefined ? parsed.collapsed : !!changes.collapsed;
-  const marker = encodeCompactMarker(style, width, collapsed);
-  return `${parsed.title}${marker ? ` ${marker}` : ""}`;
+export function setFolderPresentationTitle(value: string, presentation: { style: FolderStyle; width?: number; collapsed?: boolean }) {
+  const styleIndex = shortFolderStyles.indexOf(presentation.style);
+  const widthIndex = shortFolderWidths.indexOf(presentation.width as PresentationWidth | undefined);
+  if (styleIndex < 0 || widthIndex < 0) throw new Error("不支持的文件夹展示设置");
+  const payload = ((presentation.collapsed ? 1 : 0) * shortFolderWidths.length + widthIndex) * shortFolderStyles.length + styleIndex;
+  return `${parsePresentationTitle(value).title}${encodeShortMarker(payload, "folder")}`;
 }
 
-export function setBookmarkPresentationTitle(value: string, changes: { style?: BookmarkStyle | null; width?: number | null; rows?: 1 | 2 }): string {
-  const parsed = parsePresentationTitle(value);
-  const currentStyle = (["tile", "featured", "dock", "compact"] as const).includes(parsed.marker as "tile") ? parsed.marker as BookmarkStyle : undefined;
-  const style = changes.style === undefined ? currentStyle : changes.style || undefined;
-  const requestedWidth = changes.width === undefined ? parsed.width : changes.width;
-  const width = requestedWidth && bookmarkWidthCodes.includes(requestedWidth as PresentationWidth) ? requestedWidth as PresentationWidth : undefined;
-  const marker = encodeBookmarkMarker(style, width, changes.rows ?? parsed.rows ?? 1);
-  return `${parsed.title}${marker ? ` ${marker}` : ""}`;
+export function setBookmarkPresentationTitle(value: string, presentation: { style: BookmarkStyle; width?: number; rows?: 1 | 2 }) {
+  const styleIndex = shortBookmarkStyles.indexOf(presentation.style);
+  const widthIndex = shortBookmarkWidths.indexOf(presentation.width as PresentationWidth | undefined);
+  if (styleIndex < 0 || widthIndex < 0) throw new Error("不支持的书签展示设置");
+  const rowsIndex = (presentation.rows || 1) - 1;
+  const payload = (rowsIndex * shortBookmarkWidths.length + widthIndex) * shortBookmarkStyles.length + styleIndex;
+  return `${parsePresentationTitle(value).title}${encodeShortMarker(payload, "bookmark")}`;
 }
 
-async function createBranch(parentId: string, nodes: BookmarkNode[], idMap: Record<string, string>): Promise<void> {
-  for (const node of nodes) {
-    const created = await bookmarks.create({ parentId, title: node.title || "未命名", ...(node.url ? { url: normalizeUrl(node.url) } : {}) });
+async function createBranch(parentId: string, nodes: BookmarkNode[], idMap: Record<string, string>, firstIndex?: number): Promise<void> {
+  for (const [position, node] of nodes.entries()) {
+    const created = await bookmarks.create({ parentId, ...(firstIndex !== undefined ? { index: firstIndex + position } : {}), title: node.title || "未命名", ...(node.url ? { url: normalizeUrl(node.url) } : {}) });
     idMap[node.id] = created.id;
     if (!node.url && node.children?.length) await createBranch(created.id, node.children, idMap);
   }
 }
 
-export async function importBundle(bundle: ExportBundle, targetParentId: string): Promise<Record<string, string>> {
-  const container = await bookmarks.create({ parentId: targetParentId, title: `Xiangzi Folio 导入 · ${new Date().toLocaleDateString("zh-CN")}` });
-  const roots = bundle.bookmarkTree[0]?.children || bundle.bookmarkTree;
+export async function restoreBookmarkBranch(parentId: string, node: BookmarkNode, index?: number): Promise<Record<string, string>> {
   const idMap: Record<string, string> = {};
-  await createBranch(container.id, roots.flatMap((root) => root.children || []), idMap);
+  await createBranch(parentId, [node], idMap, index);
   return idMap;
+}
+
+export async function importBundle(bundle: ExportBundle, targetParentId: string): Promise<Record<string, string>> {
+  if (!bundle.bookmarkTree?.length) throw new Error("备份中没有可导入的书签");
+  const container = await bookmarks.create({ parentId: targetParentId, title: `Xiangzi Folio 导入 · ${new Date().toLocaleDateString("zh-CN")}` });
+  try {
+    const roots = bundle.bookmarkTree[0]?.children || bundle.bookmarkTree;
+    const idMap: Record<string, string> = {};
+    await createBranch(container.id, roots.flatMap((root) => root.children || []), idMap);
+    return idMap;
+  } catch (reason) {
+    await bookmarks.remove(container.id, true).catch(() => undefined);
+    throw reason;
+  }
 }
 
 type HtmlLink = { title: string; url: string };
@@ -253,16 +298,18 @@ export function parseBookmarksHtml(html: string): Array<HtmlFolder | HtmlLink> {
 
 export async function importHtml(html: string, targetParentId: string): Promise<void> {
   const parsed = parseBookmarksHtml(html);
+  if (parsed.length === 0) throw new Error("HTML 中没有找到可导入的书签");
   const container = await bookmarks.create({ parentId: targetParentId, title: `HTML 导入 · ${new Date().toLocaleDateString("zh-CN")}` });
-  await createBranch(container.id, parsed as BookmarkNode[], {});
+  try { await createBranch(container.id, parsed as BookmarkNode[], {}); }
+  catch (reason) { await bookmarks.remove(container.id, true).catch(() => undefined); throw reason; }
 }
 
 const escapeHtml = (value: string) => value.replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[char]!);
 function nodeToHtml(node: BookmarkNode, depth: number): string {
   const pad = "    ".repeat(depth);
-  if (node.url) return `${pad}<DT><A HREF="${escapeHtml(node.url)}">${escapeHtml(node.title)}</A>\n`;
+  if (node.url) return `${pad}<DT><A HREF="${escapeHtml(node.url)}">${escapeHtml(parsePresentationTitle(node.title).title)}</A>\n`;
   const children = (node.children || []).map((child) => nodeToHtml(child, depth + 1)).join("");
-  return `${pad}<DT><H3>${escapeHtml(node.title)}</H3>\n${pad}<DL><p>\n${children}${pad}</DL><p>\n`;
+  return `${pad}<DT><H3>${escapeHtml(parsePresentationTitle(node.title).title)}</H3>\n${pad}<DL><p>\n${children}${pad}</DL><p>\n`;
 }
 
 export function exportBookmarksHtml(tree: BookmarkNode[]): string {

@@ -7,20 +7,35 @@ const LEGACY_CACHE_KEY = "folio.bookmarks.cache.v1";
 
 export const defaultConfig: AppConfig = {
   version: 3,
-  theme: "glass",
+  theme: "orbital",
   density: "comfortable",
   glassStrength: 20,
   backgroundImage: "",
-  backgroundShade: 0,
+  backgroundShade: 10,
   searchEngine: "google",
   collapsed: [],
-  folderStyles: { "direct-all": "icons", "direct-1": "directory", "110": "mixed", "120": "directory", "130": "focus", "140": "dock" },
-  folderWidths: { "direct-all": 12, "direct-1": 4, "110": 8, "120": 6, "130": 6, "140": 12 },
+  folderStyles: { "direct-all": "directory" },
+  folderWidths: { "direct-all": 4 },
+  bookmarkStyles: {},
+  bookmarkWidths: {},
+  bookmarkRows: {},
   folderOrder: [],
-  accent: "#6558f5",
-  markerStorageVersion: 1,
+  accent: "#8fb9ee",
+  markerStorageVersion: 3,
   quickLinksSeeded: false,
   showSecondaryRoots: false,
+  recentClickToFront: false,
+  brandName: "Xiangzi",
+  brandTagline: "FOLIO",
+  brandLogo: "",
+};
+
+// The browser preview intentionally mirrors the bundled demo tree. These IDs
+// never become defaults for the installed extension, where Chrome assigns IDs.
+const demoConfig: AppConfig = {
+  ...defaultConfig,
+  folderStyles: { ...defaultConfig.folderStyles, "110": "directory", "120": "directory", "130": "directory", "140": "directory" },
+  folderWidths: { ...defaultConfig.folderWidths, "110": 4, "120": 4, "130": 4, "140": 4 },
 };
 
 const hasChromeStorage = () => typeof chrome !== "undefined" && !!chrome.storage?.local;
@@ -43,12 +58,24 @@ export async function writeLocal<T>(key: string, value: T): Promise<void> {
 
 export async function loadConfig(): Promise<AppConfig> {
   const value = await readLocal<Partial<AppConfig>>(CONFIG_KEY) || await readLocal<Partial<AppConfig>>(LEGACY_CONFIG_KEY);
+  const base = hasChromeStorage() ? defaultConfig : demoConfig;
   const migratedVisuals = value && value.version !== 3 ? {
     accent: value.accent === "#ff6b57" ? defaultConfig.accent : value.accent ?? defaultConfig.accent,
     glassStrength: value.glassStrength === 18 ? defaultConfig.glassStrength : value.glassStrength ?? defaultConfig.glassStrength,
     backgroundShade: !value.backgroundImage ? defaultConfig.backgroundShade : value.backgroundShade ?? defaultConfig.backgroundShade,
   } : {};
-  return { ...defaultConfig, ...value, ...migratedVisuals, version: 3, markerStorageVersion: value ? value.markerStorageVersion ?? 0 : 1, folderStyles: { ...defaultConfig.folderStyles, ...value?.folderStyles }, folderWidths: { ...defaultConfig.folderWidths, ...value?.folderWidths } };
+  return {
+    ...base,
+    ...value,
+    ...migratedVisuals,
+    version: 3,
+    markerStorageVersion: value ? value.markerStorageVersion ?? 0 : 3,
+    folderStyles: { ...base.folderStyles, ...value?.folderStyles },
+    folderWidths: { ...base.folderWidths, ...value?.folderWidths },
+    bookmarkStyles: { ...base.bookmarkStyles, ...value?.bookmarkStyles },
+    bookmarkWidths: { ...base.bookmarkWidths, ...value?.bookmarkWidths },
+    bookmarkRows: { ...base.bookmarkRows, ...value?.bookmarkRows },
+  };
 }
 
 export const saveConfig = (config: AppConfig) => writeLocal(CONFIG_KEY, config);

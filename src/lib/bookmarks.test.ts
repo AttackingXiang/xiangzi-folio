@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countLinks, exportBookmarksHtml, normalizeUrl, parseBookmarksHtml, parsePresentationTitle, setBookmarkPresentationTitle, setFolderPresentationTitle } from "./bookmarks";
+import type { BookmarkStyle, FolderStyle } from "../types";
 import { demoTree } from "../data/demo";
 
 describe("bookmark utilities", () => {
@@ -27,12 +28,45 @@ describe("bookmark utilities", () => {
     expect(parsePresentationTitle("OpenAI [featured]")).toEqual({ title: "OpenAI", marker: "featured" });
     expect(parsePresentationTitle("[folio:icons][folio:w3] 设计资源")).toEqual({ title: "设计资源", marker: "icons", width: 3 });
     expect(parsePresentationTitle("[folio:icons][folio:w3][folio:closed] 设计资源")).toEqual({ title: "设计资源", marker: "icons", width: 3, collapsed: true });
-    expect(setFolderPresentationTitle("[folio:mixed][folio:w6] 设计资源", { style: "icons", width: 12 })).toBe("设计资源 ~xAy");
-    expect(setFolderPresentationTitle("[folio:icons][folio:w3] 设计资源", { width: null })).toBe("设计资源 ~xAC");
-    expect(setFolderPresentationTitle("[folio:icons][folio:w3] 设计资源", { collapsed: true })).toBe("设计资源 ~xBK");
-    expect(setFolderPresentationTitle("[folio:icons][folio:w3][folio:closed] 设计资源", { collapsed: false })).toBe("设计资源 ~xAK");
     expect(parsePresentationTitle("设计资源 ~xBK")).toEqual({ title: "设计资源", marker: "icons", width: 3, collapsed: true });
-    expect(setBookmarkPresentationTitle("OpenAI", { style: "tile", width: 6, rows: 2 })).toBe("OpenAI ~bBZ");
     expect(parsePresentationTitle("OpenAI ~bBZ")).toEqual({ title: "OpenAI", marker: "tile", width: 6, rows: 2 });
+  });
+
+  it("encodes all 98 folder presentation combinations uniquely and reversibly", () => {
+    const styles: FolderStyle[] = ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"];
+    const widths = [undefined, 3, 4, 6, 8, 9, 12] as const;
+    const markers = new Set<string>();
+    for (const style of styles) for (const width of widths) for (const collapsed of [false, true]) {
+      const title = setFolderPresentationTitle("设计资源", { style, width, collapsed });
+      expect(title).toMatch(/^设计资源~[A-Za-z0-9_-]{2}$/);
+      expect(parsePresentationTitle(title)).toEqual({ title: "设计资源", marker: style, ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}) });
+      markers.add(title.slice(-3));
+    }
+    expect(markers.size).toBe(98);
+  });
+
+  it("encodes all 90 bookmark presentation combinations uniquely and reversibly", () => {
+    const styles: BookmarkStyle[] = ["row", "tile", "featured", "dock", "compact"];
+    const widths = [undefined, 1.5, 2, 3, 4, 6, 8, 12, 16] as const;
+    const markers = new Set<string>();
+    for (const style of styles) for (const width of widths) for (const rows of [1, 2] as const) {
+      const title = setBookmarkPresentationTitle("OpenAI", { style, width, rows });
+      expect(title).toMatch(/^OpenAI~[A-Za-z0-9_-]{2}$/);
+      expect(parsePresentationTitle(title)).toEqual({ title: "OpenAI", marker: style, ...(width ? { width } : {}), ...(rows === 2 ? { rows: 2 } : {}) });
+      markers.add(title.slice(-3));
+    }
+    expect(markers.size).toBe(90);
+  });
+
+  it("keeps folder and bookmark marker namespaces disjoint", () => {
+    const folderMarkers = new Set<string>();
+    const bookmarkMarkers = new Set<string>();
+    for (const style of ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as FolderStyle[]) {
+      for (const width of [undefined, 3, 4, 6, 8, 9, 12]) for (const collapsed of [false, true]) folderMarkers.add(setFolderPresentationTitle("x", { style, width, collapsed }).slice(-3));
+    }
+    for (const style of ["row", "tile", "featured", "dock", "compact"] as BookmarkStyle[]) {
+      for (const width of [undefined, 1.5, 2, 3, 4, 6, 8, 12, 16]) for (const rows of [1, 2] as const) bookmarkMarkers.add(setBookmarkPresentationTitle("x", { style, width, rows }).slice(-3));
+    }
+    expect(new Set([...folderMarkers, ...bookmarkMarkers]).size).toBe(188);
   });
 });
