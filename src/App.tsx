@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
-  ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, DownloadSimple, Export,
+  ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
   Eye, EyeSlash, FolderPlus, GearSix, LinkSimple, MagnifyingGlass,
   PencilSimple, SlidersHorizontal, SquaresFour, Star, UploadSimple, X,
 } from "@phosphor-icons/react";
@@ -375,8 +375,8 @@ export function App() {
 
     {editing && <div className="editbar glass-surface">
       <div className="editbar__mode"><span>编辑主页</span><small>布局和书签管理已合并</small></div>
-      <div className="editbar__tools"><button onClick={addFolder}><FolderPlus />新建组件</button><button onClick={() => activeRoot && setEditor({ parentId: activeRoot.id, type: "bookmark", title: "", url: "", style: "row", width: 4 })}><LinkSimple />新建书签</button><button className={config.showSecondaryRoots ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, showSecondaryRoots: !value.showSecondaryRoots }))}>{config.showSecondaryRoots ? <EyeSlash /> : <Eye />}{config.showSecondaryRoots ? "隐藏其他书签" : "显示其他书签"}</button><button onClick={() => fileInput.current?.click()}><UploadSimple />导入</button><button onClick={exportConfig}><DownloadSimple />备份</button><button onClick={exportHtml}><Export />HTML</button><button onClick={() => setSettings(!settings)} className={settings ? "active" : ""}><GearSix />外观</button><input ref={fileInput} hidden type="file" accept=".json,.html,text/html,application/json" onChange={importFile} /></div>
-      <div className="editbar__hint"><SquaresFour />拖动卡片排序 · 拖右下角调整宽度 · 卡片上可编辑或移动<button onClick={resetLayout}>重置排版</button></div>
+      <div className="editbar__tools"><button onClick={addFolder}><FolderPlus />新建组件</button><button onClick={() => activeRoot && setEditor({ parentId: activeRoot.id, type: "bookmark", title: "", url: "", style: "row", width: 4 })}><LinkSimple />新建书签</button><button className={config.showSecondaryRoots ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, showSecondaryRoots: !value.showSecondaryRoots }))}>{config.showSecondaryRoots ? <EyeSlash /> : <Eye />}{config.showSecondaryRoots ? "隐藏其他书签" : "显示其他书签"}</button><details className="editbar__data"><summary><Database />数据</summary><div><button onClick={() => fileInput.current?.click()}><UploadSimple />导入</button><button onClick={exportConfig}><DownloadSimple />备份</button><button onClick={exportHtml}><Export />HTML</button></div></details><button onClick={() => setSettings(!settings)} className={settings ? "active" : ""}><GearSix />外观</button><input ref={fileInput} hidden type="file" accept=".json,.html,text/html,application/json" onChange={importFile} /></div>
+      <div className="editbar__hint"><SquaresFour />选择卡片后调整，拖动时显示网格<button onClick={resetLayout}>重置排版</button></div>
     </div>}
 
     <main id="top" className="content">

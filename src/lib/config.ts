@@ -1,4 +1,5 @@
 import type { AppConfig, BookmarkNode, ExportBundle } from "../types";
+import { themePresetById } from "./themes";
 
 export const CONFIG_KEY = "xiangzi-folio.config.v1";
 export const CACHE_KEY = "xiangzi-folio.bookmarks.cache.v1";
@@ -68,6 +69,7 @@ export async function loadConfig(): Promise<AppConfig> {
     ...base,
     ...value,
     ...migratedVisuals,
+    theme: value?.theme && value.theme in themePresetById ? value.theme : base.theme,
     version: 3,
     markerStorageVersion: value ? value.markerStorageVersion ?? 0 : 3,
     folderStyles: { ...base.folderStyles, ...value?.folderStyles },

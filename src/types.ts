@@ -10,7 +10,10 @@ export type BookmarkNode = {
 
 export type FolderStyle = "directory" | "icons" | "mixed" | "dock" | "stack" | "focus" | "columns";
 export type BookmarkStyle = "row" | "tile" | "featured" | "dock" | "compact";
-export type ThemeMode = "glass" | "paper" | "night" | "terminal" | "orbital" | "circuit";
+export type ThemeMode =
+  | "glass" | "paper" | "night" | "terminal" | "orbital" | "circuit"
+  | "dusk" | "nordic" | "sakura" | "forest" | "ocean" | "desert"
+  | "ink" | "graphite" | "clarity";
 export type Density = "comfortable" | "compact";
 export type SearchEngine = "google" | "bing" | "baidu" | "duckduckgo";
 
