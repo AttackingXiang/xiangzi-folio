@@ -266,6 +266,17 @@ describe("Xiangzi Folio app", () => {
     expect(appearance).toHaveFocus();
   });
 
+  it("opens voluntary developer support options from the footer", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "支持开发者" }));
+    expect(screen.getByRole("dialog", { name: "支持开发者" })).toBeInTheDocument();
+    expect(screen.getByAltText("支付宝支持二维码")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开 PayPal" })).toHaveAttribute("href", "https://www.paypal.com/ncp/payment/Q3YKYE86YKBPJ");
+    await user.click(screen.getByRole("button", { name: "关闭支持开发者" }));
+    expect(screen.queryByRole("dialog", { name: "支持开发者" })).not.toBeInTheDocument();
+  });
+
   it("moves a bookmark to a selected Chrome folder from its visible action", async () => {
     const user = userEvent.setup();
     const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "101", title: "Figma", url: "https://figma.com" });

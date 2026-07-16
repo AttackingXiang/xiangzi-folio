@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
   ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
-  Eye, EyeSlash, FolderPlus, GearSix, LinkSimple, MagnifyingGlass,
+  Eye, EyeSlash, FolderPlus, GearSix, Heart, LinkSimple, MagnifyingGlass,
   PencilSimple, SquaresFour, UploadSimple, X,
 } from "@phosphor-icons/react";
 import { RiOpenaiFill } from "react-icons/ri";
@@ -11,6 +11,7 @@ import { EditorDialog } from "./components/EditorDialog";
 import { FolderView, ResizeHandle } from "./components/FolderView";
 import { QuickAccess } from "./components/QuickAccess";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SupportDialog } from "./components/SupportDialog";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { allFolders, bookmarks, exportBookmarksHtml, getRootFolders, importBundle, importHtml, parsePresentationTitle, restoreBookmarkBranch, setBookmarkPresentationTitle, setFolderPresentationTitle } from "./lib/bookmarks";
 import { createBundle, defaultConfig, downloadText, loadConfig, parseBundle, saveConfig } from "./lib/config";
@@ -102,6 +103,7 @@ export function App() {
   const [configReady, setConfigReady] = useState(false);
   const [editing, setEditing] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [editor, setEditor] = useState<EditorValue | null>(null);
   const [query, setQuery] = useState("");
   const [engineMenu, setEngineMenu] = useState(false);
@@ -430,11 +432,12 @@ export function App() {
           </MasonryArticle>;
         })}
       </div>
-      <footer className="page-footer"><span><BookmarkSimple weight="fill" />Xiangzi Folio</span><p>本地优先 · Chrome 书签双向同步 · 配置可导出</p></footer>
+      <footer className="page-footer"><span><BookmarkSimple weight="fill" />Xiangzi Folio</span><p>本地优先 · Chrome 书签双向同步 · 配置可导出</p><button className="footer-support" type="button" onClick={() => setSupportOpen(true)}><Heart weight="fill" />支持开发者</button></footer>
     </main>
     {settings && editing && <><button className="settings-scrim" data-dialog-dismiss aria-hidden="true" tabIndex={-1} onClick={() => setSettings(false)} /><SettingsPanel config={config} onConfig={onConfig} onClose={() => setSettings(false)} onError={notify} /></>}
     <MoveDialog node={moveTarget} roots={roots} onClose={() => setMoveTarget(null)} onMove={moveNode} />
     <EditorDialog value={editor} onConfig={onConfig} onClose={() => setEditor(null)} onSaved={refresh} onError={notify} />
+    <SupportDialog open={supportOpen} onClose={() => setSupportOpen(false)} />
     {toast && <div className="toast" role="status" aria-live="polite"><Check weight="bold" /><span>{toast}</span>{undoAction && <button type="button" onClick={async () => { const undo = undoAction; setUndoAction(null); await undo(); }}>撤销</button>}</div>}
   </div>;
 }
