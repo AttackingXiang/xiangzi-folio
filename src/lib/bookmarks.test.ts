@@ -10,7 +10,7 @@ describe("bookmark utilities", () => {
   });
 
   it("counts every nested bookmark", () => {
-    expect(countLinks(demoTree[0])).toBe(25);
+    expect(countLinks(demoTree[0])).toBe(30);
   });
 
   it("exports and parses nested Netscape HTML", () => {

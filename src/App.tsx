@@ -2,19 +2,20 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent,
 import {
   ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
   Eye, EyeSlash, FolderPlus, GearSix, LinkSimple, MagnifyingGlass,
-  PencilSimple, SlidersHorizontal, SquaresFour, Star, UploadSimple, X,
+  PencilSimple, SquaresFour, UploadSimple, X,
 } from "@phosphor-icons/react";
 import { RiOpenaiFill } from "react-icons/ri";
 import { SiAnthropic, SiBilibili, SiGooglegemini, SiYoutube } from "react-icons/si";
 import { MoveDialog } from "./components/BookmarkMenus";
 import { EditorDialog } from "./components/EditorDialog";
 import { FolderView, ResizeHandle } from "./components/FolderView";
+import { QuickAccess } from "./components/QuickAccess";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { allFolders, bookmarks, exportBookmarksHtml, getRootFolders, importBundle, importHtml, parsePresentationTitle, restoreBookmarkBranch, setBookmarkPresentationTitle, setFolderPresentationTitle } from "./lib/bookmarks";
-import { createBundle, defaultConfig, downloadText, loadConfig, saveConfig } from "./lib/config";
+import { createBundle, defaultConfig, downloadText, loadConfig, parseBundle, saveConfig } from "./lib/config";
 import { prepareLocalImage } from "./lib/images";
-import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, ExportBundle, FolderStyle, SearchEngine } from "./types";
+import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle, SearchEngine } from "./types";
 
 const engines: Record<SearchEngine, { label: string; action: string; host: string }> = {
   google: { label: "Google", action: "https://www.google.com/search?q=", host: "google.com" },
@@ -78,11 +79,6 @@ const quickLinks = [
 
 const quickFolderTitle = "常用入口";
 
-function quickFavicon(url: string) {
-  if (typeof chrome !== "undefined" && chrome.runtime?.id) return chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(url)}&size=64`);
-  return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(url)}&sz=128`;
-}
-
 function isLikelyUrl(value: string) {
   return /^(https?:\/\/|chrome:\/\/|file:\/\/)/i.test(value.trim()) || /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(value.trim());
 }
@@ -117,6 +113,8 @@ export function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const brandLogoInput = useRef<HTMLInputElement>(null);
   const enginePicker = useRef<HTMLDivElement>(null);
+  const engineButton = useRef<HTMLButtonElement>(null);
+  const engineOptions = useRef<Array<HTMLButtonElement | null>>([]);
   const markerMigration = useRef(false);
   const quickSeed = useRef(false);
 
@@ -136,8 +134,18 @@ export function App() {
     const close = (event: PointerEvent) => {
       if (!enginePicker.current?.contains(event.target as Node)) setEngineMenu(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEngineMenu(false);
+      engineButton.current?.focus();
+    };
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [engineMenu]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => { setToast(""); setUndoAction(null); }, undoAction ? 6500 : 2400); return () => clearTimeout(timer); }, [toast, undoAction]);
 
@@ -186,7 +194,7 @@ export function App() {
     migrate();
   }, [config, configReady, refresh, roots]);
   const activeRoot = roots[0];
-  const quickFolder = useMemo(() => allFolders(roots).find((folder) => parsePresentationTitle(folder.title).title === quickFolderTitle), [roots]);
+  const quickFolder = useMemo(() => activeRoot ? allFolders([activeRoot]).find((folder) => parsePresentationTitle(folder.title).title === quickFolderTitle) : undefined, [activeRoot]);
   useEffect(() => {
     if (!native || !configReady || config.quickLinksSeeded || quickSeed.current || !activeRoot) return;
     quickSeed.current = true;
@@ -205,13 +213,6 @@ export function App() {
     };
     seed();
   }, [activeRoot, config.quickLinksSeeded, configReady, native, quickFolder, refresh]);
-  const quickItems = useMemo(() => {
-    if (!native) return quickLinks;
-    return (quickFolder?.children || []).filter((node) => node.url).map((node) => {
-      const seed = quickLinks.find((item) => item.url.replace(/\/$/, "") === node.url?.replace(/\/$/, ""));
-      return { title: parsePresentationTitle(node.title).title, subtitle: seed?.subtitle || new URL(node.url!).hostname.replace(/^www\./, ""), url: node.url!, color: seed?.color || "#6558f5", icon: seed?.icon };
-    });
-  }, [native, quickFolder]);
   const visibleRoots = useMemo(() => config.showSecondaryRoots ? roots : roots.slice(0, 1), [config.showSecondaryRoots, roots]);
   const rawBlocks = useMemo(() => flattenBlocks(visibleRoots), [visibleRoots]);
   const blocks = useMemo(() => {
@@ -241,9 +242,7 @@ export function App() {
       const text = await file.text();
       if (file.name.toLowerCase().endsWith(".html") || text.includes("NETSCAPE-Bookmark-file")) await importHtml(text, activeRoot.id);
       else {
-        const bundle = JSON.parse(text) as ExportBundle;
-        if (bundle.kind !== "xiangzi-folio" && bundle.kind !== "folio-bookmarks") throw new Error("不是有效的 Xiangzi Folio 配置文件");
-        if (!bundle.config || typeof bundle.config !== "object") throw new Error("备份缺少有效的配置数据");
+        const bundle = parseBundle(JSON.parse(text));
         const idMap = await importBundle(bundle, activeRoot.id);
         await Promise.all(walkNodes(bundle.bookmarkTree).map(async (node) => {
           const importedId = idMap[node.id];
@@ -318,7 +317,7 @@ export function App() {
   };
   const addFolder = () => {
     if (!activeRoot) return;
-    setEditor({ parentId: activeRoot.id, type: "folder", title: "", url: "", folderStyle: "mixed", width: 6 });
+    setEditor({ parentId: activeRoot.id, type: "folder", title: "", url: "", folderStyle: "directory", width: 4 });
   };
   const moveNode = async (parentId: string) => {
     if (!moveTarget) return;
@@ -331,9 +330,12 @@ export function App() {
   };
   const deleteNode = async (node: BookmarkNode, parentId: string, index: number) => {
     const title = parsePresentationTitle(node.title).title;
-    if (!confirm(`删除“${title}”及其中的全部书签？删除后可在提示消失前撤销。`)) return;
+    const question = node.url
+      ? `删除书签“${title}”？删除后可在提示消失前撤销。`
+      : `删除文件夹“${title}”及其中的全部书签？删除后可在提示消失前撤销。`;
+    if (!confirm(question)) return;
     try {
-      await bookmarks.remove(node.id, true);
+      await bookmarks.remove(node.id, !node.url);
       await refresh();
       notify(`“${title}”已删除`, async () => {
         const idMap = await restoreBookmarkBranch(parentId, node, index);
@@ -355,6 +357,35 @@ export function App() {
     if (!config.recentClickToFront || index < 5) return;
     try { await bookmarks.move(node.id, { parentId: parent.id, index: 0 }); } catch { /* keep opening the link if reordering fails */ }
   };
+  const reorderQuickBookmark = async (id: string, parentId: string, index: number, title: string) => {
+    try {
+      await bookmarks.move(id, { parentId, index });
+      await refresh(); notify(`已放到“${title}”的位置，原入口顺延`);
+    } catch (reason) { notify(reason instanceof Error ? reason.message : "常用入口排序失败"); }
+  };
+  const moveItemIntoQuickFolder = async (id: string, parentId: string, folderTitle: string) => {
+    try {
+      await bookmarks.move(id, { parentId });
+      await refresh(); notify(`已移入“${folderTitle}”`);
+    } catch (reason) { notify(reason instanceof Error ? reason.message : "移动到常用入口失败"); }
+  };
+  const engineIds = Object.keys(engines) as SearchEngine[];
+  const focusEngineOption = (index: number) => requestAnimationFrame(() => engineOptions.current[index]?.focus());
+  const openEngineMenu = (direction: "first" | "last" | "selected") => {
+    setEngineMenu(true);
+    const selected = Math.max(0, engineIds.indexOf(config.searchEngine));
+    focusEngineOption(direction === "first" ? 0 : direction === "last" ? engineIds.length - 1 : selected);
+  };
+  const moveEngineFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next = index;
+    if (event.key === "ArrowDown") next = (index + 1) % engineIds.length;
+    else if (event.key === "ArrowUp") next = (index - 1 + engineIds.length) % engineIds.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = engineIds.length - 1;
+    else return;
+    event.preventDefault();
+    engineOptions.current[next]?.focus();
+  };
   const appStyle = { "--user-accent": config.accent, "--glass-blur": `${config.glassStrength}px`, "--shade": `${config.backgroundShade / 100}` } as React.CSSProperties;
 
   return <div className="app" data-theme={config.theme} data-density={config.density} style={appStyle}>
@@ -366,7 +397,7 @@ export function App() {
         {editing && <span className="brand__tools"><button type="button" className="icon-button" title="替换 Logo" aria-label="替换 Logo" onClick={() => brandLogoInput.current?.click()}><UploadSimple /></button><button type="button" className="icon-button danger" title="删除 Logo" aria-label="删除 Logo" onClick={() => onConfig((value) => ({ ...value, brandLogo: "" }))}><X /></button><input ref={brandLogoInput} hidden type="file" accept="image/*" onChange={pickBrandLogo} /></span>}
       </div>
       <form className="search" onSubmit={search}>
-        <div ref={enginePicker} className="engine-picker"><button type="button" aria-label={`选择搜索引擎，当前 ${engines[config.searchEngine].label}`} aria-expanded={engineMenu} onClick={() => setEngineMenu(!engineMenu)}><Browsers weight="duotone" /><span>{engines[config.searchEngine].label}</span><CaretDown /></button>{engineMenu && <div className="engine-menu" role="listbox" aria-label="搜索引擎">{(Object.keys(engines) as SearchEngine[]).map((id) => <button type="button" role="option" aria-selected={config.searchEngine === id} key={id} className={config.searchEngine === id ? "active" : ""} onClick={() => { onConfig((value) => ({ ...value, searchEngine: id })); setEngineMenu(false); }}>{engines[id].label}<small>{engines[id].host}</small></button>)}</div>}</div>
+        <div ref={enginePicker} className="engine-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setEngineMenu(false); }}><button ref={engineButton} type="button" aria-label={`选择搜索引擎，当前 ${engines[config.searchEngine].label}`} aria-expanded={engineMenu} aria-haspopup="menu" onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openEngineMenu("selected"); } else if (event.key === "ArrowUp") { event.preventDefault(); openEngineMenu("last"); } }} onClick={() => setEngineMenu(!engineMenu)}><Browsers weight="duotone" /><span>{engines[config.searchEngine].label}</span><CaretDown /></button>{engineMenu && <div className="engine-menu" role="menu" aria-label="搜索引擎">{engineIds.map((id, index) => <button ref={(element) => { engineOptions.current[index] = element; }} type="button" role="menuitemradio" aria-checked={config.searchEngine === id} key={id} className={config.searchEngine === id ? "active" : ""} onKeyDown={(event) => moveEngineFocus(event, index)} onClick={() => { onConfig((value) => ({ ...value, searchEngine: id })); setEngineMenu(false); requestAnimationFrame(() => engineButton.current?.focus()); }}>{engines[id].label}<small>{engines[id].host}</small></button>)}</div>}</div>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`使用 ${engines[config.searchEngine].label} 搜索，或输入网址`} aria-label="浏览器搜索" />
         <button className="search__submit" aria-label="搜索"><MagnifyingGlass weight="bold" /></button>
       </form>
@@ -380,10 +411,7 @@ export function App() {
     </div>}
 
     <main id="top" className="content">
-      {quickItems.length > 0 && <section className="quick-access" aria-label="常用入口">
-        <header><div><Star weight="fill" /><span>常用入口</span></div><button onClick={toggleAll}><SlidersHorizontal />全部展开 / 收起</button></header>
-        <div className="quick-access__grid">{quickItems.map((item) => <a key={`${item.title}-${item.url}`} href={item.url} style={{ "--quick-color": item.color } as React.CSSProperties}><span className="quick-access__icon">{item.icon ? <item.icon aria-hidden="true" /> : <img src={quickFavicon(item.url)} alt="" />}</span><span><strong>{item.title}</strong><small>{item.subtitle}</small></span></a>)}</div>
-      </section>}
+      {quickFolder && <QuickAccess folder={quickFolder} config={config} editing={editing} onToggleAll={toggleAll} onEdit={setEditor} onMove={(node) => setMoveTarget(node)} onDelete={deleteNode} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onReorder={reorderQuickBookmark} onMoveInto={moveItemIntoQuickFolder} />}
       {error && <div className="error-banner">{error}<button onClick={refresh}>重新读取</button></div>}
       {!loading && blocks.length === 0 && <div className="empty-state glass-surface"><BookmarkSimple weight="duotone" /><h2>这里还没有书签</h2><p>进入编辑模式，新建文件夹或导入 Chrome 书签 HTML。</p><button className="button button--primary" onClick={() => setEditing(true)}>开始整理</button></div>}
       <div className={`bookmark-grid ${editing ? "is-layout-editing" : ""}`}>
@@ -397,14 +425,14 @@ export function App() {
           const selected = editing && selectedBlock === block.id;
           return <MasonryArticle key={block.id} width={width} tabIndex={editing ? 0 : undefined} aria-label={editing ? `选择并调整 ${parsedBlock.title}` : undefined} className={`block-wrap ${selected ? "is-selected" : ""} ${draggedBlock === block.id ? "is-dragging" : ""}`} draggable={editing} onClick={() => editing && setSelectedBlock(block.id)} onFocus={() => editing && setSelectedBlock(block.id)} onDragStart={(event) => { setSelectedBlock(block.id); setDraggedBlock(block.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedBlock(null)} onDragOver={(event) => editing && event.preventDefault()} onDrop={(event) => moveBlock(event, block.id)}>
             {selected ? <div className="block-toolbar"><span className="drag-label"><SquaresFour />拖动</span><div className="width-presets">{widthPresets.map((preset) => <button type="button" key={preset.value} className={width === preset.value ? "active" : ""} title={`${preset.label} · ${preset.value}/12`} onClick={(event) => { event.stopPropagation(); commitBlockWidth(block, preset.value); }}>{preset.label}</button>)}</div></div> : editing && <button type="button" className="block-select" onClick={() => setSelectedBlock(block.id)}>选择后调整</button>}
-            <FolderView node={block} block pageSpan={width} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "directory", width: 4 })} onNewBookmark={(parentId) => setEditor({ parentId, type: "bookmark", title: "", url: "", style: "row", width: 4 })} onRecentClick={moveRecentBookmarkToFront} />
+            <FolderView node={block} block pageSpan={width} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} />
             {selected && <ResizeHandle width={width} onWidth={(next) => onConfig((value) => ({ ...value, folderWidths: { ...value.folderWidths, [block.id]: next } }))} onCommit={(next) => commitBlockWidth(block, next)} />}
           </MasonryArticle>;
         })}
       </div>
       <footer className="page-footer"><span><BookmarkSimple weight="fill" />Xiangzi Folio</span><p>本地优先 · Chrome 书签双向同步 · 配置可导出</p></footer>
     </main>
-    {settings && editing && <><button className="settings-scrim" aria-label="关闭设置" onClick={() => setSettings(false)} /><SettingsPanel config={config} onConfig={onConfig} onClose={() => setSettings(false)} onError={notify} /></>}
+    {settings && editing && <><button className="settings-scrim" data-dialog-dismiss aria-hidden="true" tabIndex={-1} onClick={() => setSettings(false)} /><SettingsPanel config={config} onConfig={onConfig} onClose={() => setSettings(false)} onError={notify} /></>}
     <MoveDialog node={moveTarget} roots={roots} onClose={() => setMoveTarget(null)} onMove={moveNode} />
     <EditorDialog value={editor} onConfig={onConfig} onClose={() => setEditor(null)} onSaved={refresh} onError={notify} />
     {toast && <div className="toast" role="status" aria-live="polite"><Check weight="bold" /><span>{toast}</span>{undoAction && <button type="button" onClick={async () => { const undo = undoAction; setUndoAction(null); await undo(); }}>撤销</button>}</div>}

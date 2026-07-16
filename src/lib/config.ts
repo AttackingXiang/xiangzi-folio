@@ -1,18 +1,30 @@
-import type { AppConfig, BookmarkNode, ExportBundle } from "../types";
+import type {
+  AppConfig, BookmarkNode, BookmarkStyle, Density, ExportBundle, FolderStyle, SearchEngine, ThemeMode,
+} from "../types";
 import { themePresetById } from "./themes";
 
 export const CONFIG_KEY = "xiangzi-folio.config.v1";
 export const CACHE_KEY = "xiangzi-folio.bookmarks.cache.v1";
 const LEGACY_CONFIG_KEY = "folio.config.v1";
 const LEGACY_CACHE_KEY = "folio.bookmarks.cache.v1";
+const folderStyleValues = new Set<FolderStyle>(["directory", "icons", "mixed", "dock", "stack", "focus", "columns"]);
+const bookmarkStyleValues = new Set<BookmarkStyle>(["row", "tile", "featured", "dock", "compact"]);
+const densityValues = new Set<Density>(["comfortable", "compact"]);
+const searchEngineValues = new Set<SearchEngine>(["google", "bing", "baidu", "duckduckgo"]);
+const folderWidthValues = new Set([3, 4, 6, 8, 9, 12]);
+const bookmarkWidthValues = new Set([1.5, 2, 3, 4, 6, 8, 12, 16]);
+const maxBackgroundLength = 3 * 1024 * 1024;
+const maxLogoLength = 768 * 1024;
+const maxImportedNodes = 100_000;
+const maxImportedDepth = 64;
 
 export const defaultConfig: AppConfig = {
   version: 3,
-  theme: "orbital",
+  theme: "nordic",
   density: "comfortable",
-  glassStrength: 20,
+  glassStrength: 14,
   backgroundImage: "",
-  backgroundShade: 10,
+  backgroundShade: 0,
   searchEngine: "google",
   collapsed: [],
   folderStyles: { "direct-all": "directory" },
@@ -21,7 +33,7 @@ export const defaultConfig: AppConfig = {
   bookmarkWidths: {},
   bookmarkRows: {},
   folderOrder: [],
-  accent: "#8fb9ee",
+  accent: "#5e88a5",
   markerStorageVersion: 3,
   quickLinksSeeded: false,
   showSecondaryRoots: false,
@@ -40,6 +52,60 @@ const demoConfig: AppConfig = {
 };
 
 const hasChromeStorage = () => typeof chrome !== "undefined" && !!chrome.storage?.local;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const clamp = (value: unknown, fallback: number, min: number, max: number) => typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+const safeBoolean = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
+const safeText = (value: unknown, fallback: string, maxLength: number) => typeof value === "string" ? value.slice(0, maxLength) : fallback;
+const safeLocalImage = (value: unknown, fallback: string, maxLength: number) => typeof value === "string" && value.length <= maxLength && (value === "" || value.startsWith("data:image/")) ? value : fallback;
+
+function safeStringList(value: unknown, fallback: string[] = []): string[] {
+  if (!Array.isArray(value)) return fallback;
+  return [...new Set(value.filter((item): item is string => typeof item === "string" && item.length > 0))];
+}
+
+function safeRecord<T>(value: unknown, accepts: (entry: unknown) => entry is T): Record<string, T> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([id, entry]) => id.length > 0 && accepts(entry))) as Record<string, T>;
+}
+
+export function sanitizeConfig(value: unknown, base: AppConfig = defaultConfig, markerFallback = base.markerStorageVersion): AppConfig {
+  const raw = isRecord(value) ? value : {};
+  const safeMarkerFallback = Number.isInteger(markerFallback) && markerFallback >= 0 && markerFallback <= 3 ? markerFallback : base.markerStorageVersion;
+  const theme = typeof raw.theme === "string" && raw.theme in themePresetById ? raw.theme as ThemeMode : base.theme;
+  const folderStyles = safeRecord(raw.folderStyles, (entry): entry is FolderStyle => typeof entry === "string" && folderStyleValues.has(entry as FolderStyle));
+  const folderWidths = safeRecord(raw.folderWidths, (entry): entry is number => typeof entry === "number" && folderWidthValues.has(entry));
+  const bookmarkStyles = safeRecord(raw.bookmarkStyles, (entry): entry is BookmarkStyle => typeof entry === "string" && bookmarkStyleValues.has(entry as BookmarkStyle));
+  const bookmarkWidths = safeRecord(raw.bookmarkWidths, (entry): entry is number => typeof entry === "number" && bookmarkWidthValues.has(entry));
+  const bookmarkRows = safeRecord(raw.bookmarkRows, (entry): entry is 1 | 2 => entry === 1 || entry === 2);
+  const markerStorageVersion = typeof raw.markerStorageVersion === "number" && Number.isInteger(raw.markerStorageVersion) && raw.markerStorageVersion >= 0 && raw.markerStorageVersion <= 3
+    ? raw.markerStorageVersion
+    : safeMarkerFallback;
+  return {
+    version: 3,
+    theme,
+    density: typeof raw.density === "string" && densityValues.has(raw.density as Density) ? raw.density as Density : base.density,
+    glassStrength: clamp(raw.glassStrength, base.glassStrength, 0, 36),
+    backgroundImage: safeLocalImage(raw.backgroundImage, base.backgroundImage, maxBackgroundLength),
+    backgroundShade: clamp(raw.backgroundShade, base.backgroundShade, 0, 75),
+    searchEngine: typeof raw.searchEngine === "string" && searchEngineValues.has(raw.searchEngine as SearchEngine) ? raw.searchEngine as SearchEngine : base.searchEngine,
+    collapsed: safeStringList(raw.collapsed, base.collapsed),
+    folderStyles: { ...base.folderStyles, ...folderStyles },
+    folderWidths: { ...base.folderWidths, ...folderWidths },
+    bookmarkStyles: { ...base.bookmarkStyles, ...bookmarkStyles },
+    bookmarkWidths: { ...base.bookmarkWidths, ...bookmarkWidths },
+    bookmarkRows: { ...base.bookmarkRows, ...bookmarkRows },
+    folderOrder: safeStringList(raw.folderOrder, base.folderOrder),
+    accent: typeof raw.accent === "string" && /^#[\da-f]{6}$/i.test(raw.accent) ? raw.accent : base.accent,
+    markerStorageVersion,
+    quickLinksSeeded: safeBoolean(raw.quickLinksSeeded, base.quickLinksSeeded),
+    showSecondaryRoots: safeBoolean(raw.showSecondaryRoots, base.showSecondaryRoots),
+    recentClickToFront: safeBoolean(raw.recentClickToFront, base.recentClickToFront),
+    brandName: safeText(raw.brandName, base.brandName, 80),
+    brandTagline: safeText(raw.brandTagline, base.brandTagline, 80),
+    brandLogo: safeLocalImage(raw.brandLogo, base.brandLogo, maxLogoLength),
+  };
+}
 
 export async function readLocal<T>(key: string): Promise<T | undefined> {
   if (hasChromeStorage()) {
@@ -65,19 +131,7 @@ export async function loadConfig(): Promise<AppConfig> {
     glassStrength: value.glassStrength === 18 ? defaultConfig.glassStrength : value.glassStrength ?? defaultConfig.glassStrength,
     backgroundShade: !value.backgroundImage ? defaultConfig.backgroundShade : value.backgroundShade ?? defaultConfig.backgroundShade,
   } : {};
-  return {
-    ...base,
-    ...value,
-    ...migratedVisuals,
-    theme: value?.theme && value.theme in themePresetById ? value.theme : base.theme,
-    version: 3,
-    markerStorageVersion: value ? value.markerStorageVersion ?? 0 : 3,
-    folderStyles: { ...base.folderStyles, ...value?.folderStyles },
-    folderWidths: { ...base.folderWidths, ...value?.folderWidths },
-    bookmarkStyles: { ...base.bookmarkStyles, ...value?.bookmarkStyles },
-    bookmarkWidths: { ...base.bookmarkWidths, ...value?.bookmarkWidths },
-    bookmarkRows: { ...base.bookmarkRows, ...value?.bookmarkRows },
-  };
+  return sanitizeConfig({ ...base, ...value, ...migratedVisuals }, base, value ? value.markerStorageVersion ?? 0 : 3);
 }
 
 export const saveConfig = (config: AppConfig) => writeLocal(CONFIG_KEY, config);
@@ -86,6 +140,39 @@ export const saveCache = (tree: BookmarkNode[]) => writeLocal(CACHE_KEY, tree);
 
 export function createBundle(config: AppConfig, tree: BookmarkNode[]): ExportBundle {
   return { kind: "xiangzi-folio", exportedAt: new Date().toISOString(), config, bookmarkTree: tree };
+}
+
+export function parseBundle(value: unknown): ExportBundle {
+  if (!isRecord(value) || (value.kind !== "xiangzi-folio" && value.kind !== "folio-bookmarks")) throw new Error("不是有效的 Xiangzi Folio 配置文件");
+  if (!Array.isArray(value.bookmarkTree) || value.bookmarkTree.length === 0) throw new Error("备份中没有可导入的书签");
+  const seenIds = new Set<string>();
+  let nodeCount = 0;
+  const parseNodes = (nodes: unknown[], depth: number): BookmarkNode[] => {
+    if (depth > maxImportedDepth) throw new Error(`备份目录层级不能超过 ${maxImportedDepth} 层`);
+    return nodes.map((entry) => {
+      if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id || typeof entry.title !== "string") throw new Error("备份包含无效的书签节点");
+      if (seenIds.has(entry.id)) throw new Error("备份包含重复的书签 ID");
+      seenIds.add(entry.id);
+      nodeCount += 1;
+      if (nodeCount > maxImportedNodes) throw new Error(`备份最多支持 ${maxImportedNodes} 个节点`);
+      if (entry.url !== undefined && typeof entry.url !== "string") throw new Error("备份包含无效的网址");
+      if (entry.children !== undefined && !Array.isArray(entry.children)) throw new Error("备份包含无效的文件夹内容");
+      return {
+        id: entry.id,
+        ...(typeof entry.parentId === "string" ? { parentId: entry.parentId } : {}),
+        ...(typeof entry.index === "number" && Number.isInteger(entry.index) && entry.index >= 0 ? { index: entry.index } : {}),
+        title: entry.title.slice(0, 10_000),
+        ...(typeof entry.url === "string" ? { url: entry.url.slice(0, 100_000) } : {}),
+        ...(Array.isArray(entry.children) ? { children: parseNodes(entry.children, depth + 1) } : {}),
+      };
+    });
+  };
+  return {
+    kind: value.kind,
+    exportedAt: typeof value.exportedAt === "string" ? value.exportedAt : new Date(0).toISOString(),
+    config: sanitizeConfig(value.config, defaultConfig, 3),
+    bookmarkTree: parseNodes(value.bookmarkTree, 0),
+  };
 }
 
 export function downloadText(name: string, content: string, type: string): void {

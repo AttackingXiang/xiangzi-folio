@@ -8,6 +8,15 @@ export const demoTree: BookmarkNode[] = [{
   title: "root",
   children: [
     folder("1", "书签栏", [
+      folder("90", "常用入口", [
+        link("91", "ChatGPT", "https://chatgpt.com"),
+        link("92", "Claude", "https://claude.ai"),
+        link("93", "Gemini", "https://gemini.google.com"),
+        folder("94", "影音与社区", [
+          link("95", "YouTube", "https://youtube.com"),
+          link("96", "Bilibili", "https://bilibili.com"),
+        ]),
+      ]),
       link("101", "Figma", "https://figma.com"),
       link("102", "GitHub", "https://github.com"),
       link("103", "Notion", "https://notion.so"),

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type CSSProperties, type DragEvent, type PointerEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent } from "react";
 import {
   ArrowSquareOut, CaretDown, CaretRight, DotsSixVertical, DotsThree, Folder, FolderOpen,
   GridFour, LinkSimple, ListBullets, PencilSimple, Rows, SquaresFour, Trash,
@@ -34,7 +34,7 @@ type Props = {
   onToast: (text: string) => void;
   onMove: (node: BookmarkNode) => void;
   onNewFolder: (parentId: string) => void;
-  onNewBookmark: (parentId: string) => void;
+  onNewBookmark: (parentId: string, defaults: Pick<EditorValue, "style" | "width" | "rows">) => void;
   onDelete: (node: BookmarkNode, parentId: string, index: number) => void;
   onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => void;
 };
@@ -76,6 +76,18 @@ function bookmarkDropSlotAt(clientX: number, clientY: number) {
   return activeDropSlots.find((slot) => x >= slot.left && x < slot.right && y >= slot.top && y < slot.bottom) || null;
 }
 
+function bookmarkTailSlotAt(parentId: string, clientX: number, clientY: number) {
+  const x = clientX + window.scrollX - dragScroll.x;
+  const y = clientY + window.scrollY - dragScroll.y;
+  const slots = activeDropSlots.filter((slot) => slot.targetParentId === parentId);
+  if (!slots.length) return false;
+  const finalRowTop = Math.max(...slots.map((slot) => slot.top));
+  const finalRow = slots.filter((slot) => Math.abs(slot.top - finalRowTop) < 2);
+  const finalRight = Math.max(...finalRow.map((slot) => slot.right));
+  const finalBottom = Math.max(...finalRow.map((slot) => slot.bottom));
+  return y >= finalBottom || (y >= finalRowTop && y < finalBottom && x >= finalRight);
+}
+
 function favicon(url = "") {
   if (typeof chrome !== "undefined" && chrome.runtime?.id) {
     return chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`);
@@ -84,11 +96,20 @@ function favicon(url = "") {
   catch { return ""; }
 }
 
-function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onRecentClick, dropTarget, variant = "row", defaultWidth, pageSpan = 12 }: {
+function newBookmarkDefaults(style: FolderStyle): Pick<EditorValue, "style" | "width" | "rows"> {
+  if (style === "icons" || style === "mixed") return { style: "tile", width: 1.5, rows: 1 };
+  if (style === "dock") return { style: "dock", width: 3, rows: 1 };
+  if (style === "stack") return { style: "compact", width: 4, rows: 1 };
+  if (style === "focus") return { style: "featured", width: 8, rows: 1 };
+  if (style === "columns") return { style: "row", width: 6, rows: 1 };
+  return { style: "row", width: 4, rows: 1 };
+}
+
+function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDelete, onRecentClick, dropTarget, variant = "row", defaultWidth, pageSpan = 12 }: {
   node: BookmarkNode; parent: BookmarkNode; index: number; editing: boolean;
   config: AppConfig;
   onEdit: Props["onEdit"];
-  onMove: Props["onMove"]; onRecentClick: Props["onRecentClick"];
+  onMove: Props["onMove"]; onDelete: Props["onDelete"]; onRecentClick: Props["onRecentClick"];
   dropTarget: boolean;
   variant?: "row" | "tile" | "featured" | "dock";
   defaultWidth?: number;
@@ -122,7 +143,7 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onRece
         {markedVariant === "row" && <ArrowSquareOut className="bookmark__open" weight="bold" />}
       </a>
       {organize && (
-        <div className="bookmark__actions"><button className="icon-button" aria-label={`编辑书签 ${parsed.title}`} title="编辑书签" onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows }); }}><PencilSimple /></button><button className="icon-button" aria-label={`移动书签 ${parsed.title}`} title="移动书签" onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button></div>
+        <div className="bookmark__actions"><button className="icon-button" aria-label={`编辑书签 ${parsed.title}`} title="编辑书签" onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows }); }}><PencilSimple /></button><button className="icon-button" aria-label={`移动书签 ${parsed.title}`} title="移动书签" onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button><button className="icon-button danger" aria-label={`删除书签 ${parsed.title}`} title="删除书签" onClick={(event) => { event.preventDefault(); onDelete(node, parent.id, index); }}><Trash /></button></div>
       )}
     </div>
   );
@@ -132,18 +153,35 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const [menu, setMenu] = useState(false);
   const [dropReady, setDropReady] = useState(false);
   const [bookmarkDropPreview, setBookmarkDropPreview] = useState<BookmarkDropPreview | null>(null);
+  const styleActions = useRef<HTMLDivElement>(null);
+  const styleTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const clear = () => setBookmarkDropPreview(null);
+    const clear = () => { setDropReady(false); setBookmarkDropPreview(null); };
     const clearOther = (event: Event) => {
       if ((event as CustomEvent<string | null>).detail !== node.id) setBookmarkDropPreview(null);
     };
     window.addEventListener(dragEndEvent, clear);
     window.addEventListener(dragPreviewEvent, clearOther);
+    // Native dragend can be delivered after the React tree has reflowed (or a
+    // browser cancels a drop). Capture it at document level so no destination
+    // overlay can remain stuck on a parent folder.
+    document.addEventListener("dragend", clear, true);
+    document.addEventListener("drop", clear, true);
     return () => {
       window.removeEventListener(dragEndEvent, clear);
       window.removeEventListener(dragPreviewEvent, clearOther);
+      document.removeEventListener("dragend", clear, true);
+      document.removeEventListener("drop", clear, true);
     };
   }, [node.id]);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: globalThis.PointerEvent) => {
+      if (!styleActions.current?.contains(event.target as Node)) setMenu(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menu]);
   const parsedFolder = parsePresentationTitle(node.title);
   const markerStyle = ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"].includes(parsedFolder.marker || "") ? parsedFolder.marker as FolderStyle : undefined;
   const style = config.markerStorageVersion >= 3 ? markerStyle || config.folderStyles[node.id] || (block ? "directory" : "icons") : config.folderStyles[node.id] || markerStyle || (block ? "directory" : "icons");
@@ -177,7 +215,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const dropBeforeFolder = async (event: DragEvent) => {
     if (!organize || virtual) return;
     const raw = event.dataTransfer.getData(dragMime); if (!raw) return;
-    event.preventDefault(); event.stopPropagation(); setDropReady(false);
+    event.preventDefault(); event.stopPropagation(); setDropReady(false); window.dispatchEvent(new Event(dragEndEvent));
     const item = JSON.parse(raw) as { id: string; parentId?: string; index: number };
     if (item.id === node.id || !node.parentId) return;
     const targetIndex = item.parentId === node.parentId && item.index < siblingIndex ? siblingIndex - 1 : siblingIndex;
@@ -222,7 +260,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const dropInto = async (event: DragEvent) => {
     if (!organize) return;
     const raw = event.dataTransfer.getData(dragMime); if (!raw) return;
-    event.preventDefault(); event.stopPropagation(); setDropReady(false);
+    event.preventDefault(); event.stopPropagation(); setDropReady(false); window.dispatchEvent(new Event(dragEndEvent));
     const item = JSON.parse(raw) as { id: string };
     if (item.id === effectiveParent.id) return;
     try { activeDragItem = null; setBookmarkDropPreview(null); await bookmarks.move(item.id, { parentId: effectiveParent.id }); await onRefresh(); onToast(`已移入“${parsedFolder.title}”`); }
@@ -230,7 +268,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   };
   const dropAtBookmarkPreview = async (event: DragEvent) => {
     if (activeDragItem?.type !== "bookmark") return;
-    event.preventDefault(); event.stopPropagation();
+    event.preventDefault(); event.stopPropagation(); window.dispatchEvent(new Event(dragEndEvent));
     const preview = bookmarkDropPreview;
     if (!preview) return;
     const targetIndex = preview.sourceParentId === preview.targetParentId && preview.sourceIndex < preview.targetIndex ? preview.targetIndex - 1 : preview.targetIndex;
@@ -246,6 +284,15 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
     event.preventDefault(); event.stopPropagation(); setDropReady(false);
     const slot = bookmarkDropSlotAt(event.clientX, event.clientY);
     if (!slot || slot.targetId === item.id) {
+      if (bookmarkTailSlotAt(effectiveParent.id, event.clientX, event.clientY)) {
+        window.dispatchEvent(new CustomEvent(dragPreviewEvent, { detail: node.id }));
+        setBookmarkDropPreview({
+          sourceId: item.id, sourceParentId: item.parentId, sourceIndex: item.index,
+          targetId: `tail-${node.id}`, targetParentId: effectiveParent.id, targetIndex: children.length, targetTitle: "本组末尾",
+          width: item.width || 1.5, rows: item.rows || 1,
+        });
+        return;
+      }
       window.dispatchEvent(new CustomEvent(dragPreviewEvent, { detail: null }));
       return;
     }
@@ -259,8 +306,9 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const common = { config, editing, pageSpan: componentSpan, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick };
   const renderLink = (child: BookmarkNode, index: number, variant: "row" | "tile" | "featured" | "dock", defaultWidth?: number) => <Fragment key={`${child.id}-${index}`}>
     {bookmarkDropPreview?.targetId === child.id && <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} />}
-    <LinkItem node={child} parent={parentFor(child)} index={child.index ?? index} config={config} variant={variant} defaultWidth={defaultWidth} pageSpan={componentSpan} editing={editing} onEdit={onEdit} onMove={onMove} onRecentClick={onRecentClick} dropTarget={bookmarkDropPreview?.targetId === child.id} />
+    <LinkItem node={child} parent={parentFor(child)} index={child.index ?? index} config={config} variant={variant} defaultWidth={defaultWidth} pageSpan={componentSpan} editing={editing} onEdit={onEdit} onMove={onMove} onDelete={onDelete} onRecentClick={onRecentClick} dropTarget={bookmarkDropPreview?.targetId === child.id} />
   </Fragment>;
+  const renderTail = (variant: "row" | "tile" | "featured" | "dock") => bookmarkDropPreview?.targetId === `tail-${node.id}` ? <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} /> : null;
   return (
     <section className={`folder ${block ? "folder--block" : "folder--nested"} folder--${displayStyle} ${collapsed ? "is-collapsed" : ""} ${links.length > 12 ? "is-dense" : ""} ${dropReady && !bookmarkDropPreview ? "is-drop-ready" : ""}`} style={{ "--page-columns": componentSpan, ...(!block ? { "--folder-span": renderedFolderSpan } : {}) } as React.CSSProperties} data-folder-id={node.id} data-native-title={node.title} onDragEnter={previewFolderDrop} onDragLeave={() => setDropReady(false)} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
       {organize && dropReady && !bookmarkDropPreview && <div className="folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>放到这里</strong><small>移入“{parsedFolder.title}”</small></div>}
@@ -274,23 +322,23 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
         </button>
         {organize && <span className="drop-hint">拖入此文件夹</span>}
         {editing && (
-          <div className="folder__actions">
-            {!virtual && <><button className="icon-button" title="编辑文件夹" aria-label={`编辑文件夹 ${parsedFolder.title}`} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed })}><PencilSimple /></button><button className="icon-button" title="移动文件夹" aria-label={`移动文件夹 ${parsedFolder.title}`} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title="新建书签" aria-label={`在 ${parsedFolder.title} 中新建书签`} onClick={() => onNewBookmark(node.id)}><LinkSimple /></button><button className="icon-button" title="新建子文件夹" aria-label={`在 ${parsedFolder.title} 中新建文件夹`} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
-            <button className="icon-button" title="设置显示样式" aria-label={`设置 ${parsedFolder.title} 的显示样式`} aria-expanded={menu} onClick={() => setMenu(!menu)}><DotsThree weight="bold" /></button>
-            {menu && <div className="style-menu" onMouseLeave={() => setMenu(false)}><small className="style-menu__label">展示样式</small>{stylesList.map((item) => <button key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{item.label}</button>)}{!block && <><small className="style-menu__label">内部占位</small><div className="style-menu__widths">{[{ value: 12, label: "整行" }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}</div>}
+          <div ref={styleActions} className="folder__actions" onKeyDown={(event) => { if (event.key === "Escape" && menu) { event.preventDefault(); setMenu(false); styleTrigger.current?.focus(); } }}>
+            {!virtual && <><button className="icon-button" title="编辑文件夹" aria-label={`编辑文件夹 ${parsedFolder.title}`} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed })}><PencilSimple /></button><button className="icon-button" title="移动文件夹" aria-label={`移动文件夹 ${parsedFolder.title}`} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title="新建书签" aria-label={`在 ${parsedFolder.title} 中新建书签`} onClick={() => onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><LinkSimple /></button><button className="icon-button" title="新建子文件夹" aria-label={`在 ${parsedFolder.title} 中新建文件夹`} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
+            <button ref={styleTrigger} className="icon-button" title="设置显示样式" aria-label={`设置 ${parsedFolder.title} 的显示样式`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><DotsThree weight="bold" /></button>
+            {menu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">展示样式</small>{stylesList.map((item) => <button role="menuitemradio" aria-checked={style === item.id} key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{item.label}</button>)}{!block && <><small role="presentation" className="style-menu__label">内部占位</small><div role="group" aria-label="内部占位" className="style-menu__widths">{[{ value: 12, label: "整行" }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button role="menuitemradio" aria-checked={nestedWidth === item.value} key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}</div>}
             {!virtual && <button className="icon-button danger" title="删除文件夹" aria-label={`删除文件夹 ${parsedFolder.title}`} onClick={() => onDelete(node, node.parentId || effectiveParent.id, siblingIndex)}><Trash /></button>}
           </div>
         )}
       </header>
       {!collapsed && <div className="folder__body" onDragEnter={previewFolderDrop} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
-        {children.length === 0 && <button className="empty-folder" onClick={() => editing && onEdit({ parentId: node.id, type: "bookmark", title: "", url: "" })}><Folder />空文件夹{editing && " · 添加书签"}</button>}
+        {children.length === 0 && <button className="empty-folder" onClick={() => editing && onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><Folder />空文件夹{editing && " · 添加书签"}</button>}
         {(displayStyle === "directory" || displayStyle === "stack" || displayStyle === "columns") && <div className="directory-grid" {...bookmarkGridDrag}>{children.map((child, index) => child.url
           ? renderLink(child, child.index ?? index, "row", displayStyle === "columns" ? 6 : 4)
-          : <FolderView key={child.id} node={child} siblingIndex={index} level={level + 1} {...common} />)}</div>}
-        {displayStyle === "icons" && directLinks.length > 0 && <div className="icon-grid" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "tile"))}</div>}
-        {displayStyle === "mixed" && directLinks.length > 0 && <div className="mixed-grid" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index === 0 ? "featured" : "tile"))}</div>}
-        {displayStyle === "dock" && directLinks.length > 0 && <div className="dock-list" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "dock"))}</div>}
-        {displayStyle === "focus" && directLinks.length > 0 && <div className="focus-list" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index < 2 ? "featured" : "row"))}</div>}
+          : <FolderView key={child.id} node={child} siblingIndex={index} level={level + 1} {...common} />)}{renderTail("row")}</div>}
+        {displayStyle === "icons" && directLinks.length > 0 && <div className="icon-grid" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "tile"))}{renderTail("tile")}</div>}
+        {displayStyle === "mixed" && directLinks.length > 0 && <div className="mixed-grid" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index === 0 ? "featured" : "tile"))}{renderTail("tile")}</div>}
+        {displayStyle === "dock" && directLinks.length > 0 && <div className="dock-list" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "dock"))}{renderTail("dock")}</div>}
+        {displayStyle === "focus" && directLinks.length > 0 && <div className="focus-list" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index < 2 ? "featured" : "row"))}{renderTail("row")}</div>}
         {displayStyle !== "directory" && displayStyle !== "stack" && displayStyle !== "columns" && childFolders.length > 0 && <div className="folder-groups">{childFolders.map((child) => <FolderView key={child.id} node={child} siblingIndex={children.indexOf(child)} level={level + 1} {...common} />)}</div>}
         {organize && <div className="folder-drop-zone" onDragEnter={previewFolderDrop} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={dropInto}><FolderOpen />拖到此区域，移入“{parsedFolder.title}”</div>}
       </div>}

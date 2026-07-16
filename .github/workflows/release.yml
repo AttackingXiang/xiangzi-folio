@@ -1,0 +1,51 @@
+name: Build and release extension
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    outputs:
+      asset_name: ${{ steps.package.outputs.asset_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
+      - id: package
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          asset_name="xiangzi-folio-extension-v${version}.zip"
+          mkdir -p release
+          (cd dist && zip -qr -X "../release/${asset_name}" .)
+          echo "asset_name=${asset_name}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xiangzi-folio-extension
+          path: release/${{ steps.package.outputs.asset_name }}
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify-and-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: xiangzi-folio-extension
+          path: release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: ${{ needs.verify-and-package.outputs.asset_name }}
+        run: gh release create "$GITHUB_REF_NAME" "release/${ASSET_NAME}" --title "Xiangzi Folio ${GITHUB_REF_NAME}" --generate-notes

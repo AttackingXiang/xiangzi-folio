@@ -1,6 +1,6 @@
 {
   "name": "xiangzi-folio",
-  "version": "1.1.0",
+  "version": "1.1.9",
   "private": true,
   "type": "module",
   "description": "A local-first, Chrome bookmark powered new-tab dashboard.",
@@ -13,11 +13,9 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "@vitejs/plugin-react": "^5.0.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-icons": "^5.7.0",
-    "vite": "^6.4.2"
+    "react-icons": "^5.7.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
@@ -26,8 +24,10 @@
     "@types/chrome": "^0.1.31",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.2.0",
     "jsdom": "^26.1.0",
     "typescript": "^5.9.3",
+    "vite": "^6.4.3",
     "vitest": "^3.2.4"
   }
 }

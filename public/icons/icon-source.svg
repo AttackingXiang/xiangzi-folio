@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="folio" x1="72" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A6EFF"/>
+      <stop offset="1" stop-color="#5146E8"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="120" fill="url(#folio)"/>
+  <path fill="#fff" d="M368 128H144a32 32 0 0 0-32 32v280a16 16 0 0 0 24.48 13.56L256 378.86l119.54 74.7A16 16 0 0 0 400 440V160a32 32 0 0 0-32-32Z" transform="rotate(-3 256 290)"/>
+</svg>
