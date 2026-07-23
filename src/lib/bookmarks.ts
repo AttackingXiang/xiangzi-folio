@@ -141,7 +141,9 @@ const shortBookmarkStyles: BookmarkStyle[] = ["row", "tile", "featured", "dock",
 const shortBookmarkWidths: Array<PresentationWidth | undefined> = [undefined, 1.5, 2, 3, 4, 6, 8, 12, 16];
 const shortMarkerVersion = 1;
 
-type ShortPresentation = { kind: "folder" | "bookmark"; marker: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2 };
+export type FolderRole = "quick-access";
+type ShortPresentation = { kind: "folder" | "bookmark"; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole };
+const quickAccessPayload = shortFolderStyles.length * shortFolderWidths.length * 2;
 
 function shortChecksum(payload: number, type: number, version: number) {
   return (payload ^ (payload >> 2) ^ (payload >> 5) ^ (type * 3) ^ version) & 3;
@@ -167,6 +169,7 @@ function decodeShortMarker(value: string): ShortPresentation | undefined {
   const checksum = (word >> 10) & 3;
   if (version !== shortMarkerVersion || checksum !== shortChecksum(payload, type, version)) return undefined;
   if (type === 0) {
+    if (payload === quickAccessPayload) return { kind: "folder", role: "quick-access" };
     if (payload >= shortFolderStyles.length * shortFolderWidths.length * 2) return undefined;
     const styleIndex = payload % shortFolderStyles.length;
     const remainder = Math.floor(payload / shortFolderStyles.length);
@@ -209,7 +212,7 @@ function decodeBookmarkMarker(value: string) {
   return { marker: style, width, rows: (code & 64) ? 2 as const : 1 as const };
 }
 
-export function parsePresentationTitle(value: string): { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2 } {
+export function parsePresentationTitle(value: string): { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole } {
   const short = decodeShortMarker(value);
   const compact = decodeCompactMarker(value);
   const bookmarkCompact = decodeBookmarkMarker(value);
@@ -225,7 +228,15 @@ export function parsePresentationTitle(value: string): { title: string; marker?:
   const title = value.replace(markerPattern, " ").replace(short ? shortMarkerPattern : /$^/, "").replace(hasCompact ? compactMarkerPattern : /$^/, "").replace(hasBookmarkCompact ? bookmarkMarkerPattern : /$^/, "").replace(/\s+/g, " ").trim() || "未命名";
   const collapsed = short?.collapsed || compact.collapsed || tokens.includes("closed");
   const rows = short?.rows || bookmarkCompact.rows;
-  return { title, ...(marker ? { marker } : {}), ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}), ...(rows === 2 ? { rows } : {}) };
+  return { title, ...(marker ? { marker } : {}), ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}), ...(rows === 2 ? { rows } : {}), ...(short?.role ? { role: short.role } : {}) };
+}
+
+export function isQuickAccessFolder(node: BookmarkNode): boolean {
+  return !node.url && parsePresentationTitle(node.title).role === "quick-access";
+}
+
+export function setQuickAccessTitle(value: string): string {
+  return `${parsePresentationTitle(value).title}${encodeShortMarker(quickAccessPayload, "folder")}`;
 }
 
 export function setFolderPresentationTitle(value: string, presentation: { style: FolderStyle; width?: number; collapsed?: boolean }) {

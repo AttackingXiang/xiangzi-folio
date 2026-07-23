@@ -266,6 +266,20 @@ describe("Xiangzi Folio app", () => {
     expect(appearance).toHaveFocus();
   });
 
+  it("switches every settings label to English and persists the language", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    await user.click(screen.getByRole("button", { name: "外观" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "界面语言" }), "en");
+    expect(screen.getByRole("dialog", { name: "Home settings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Theme presets 15 sets" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use Nordic Dawn theme" })).toBeInTheDocument();
+    expect(document.querySelector(".quick-access")).toHaveAttribute("aria-label", "Quick Access");
+    expect(document.documentElement.lang).toBe("en");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").language).toBe("en"));
+  });
+
   it("opens voluntary developer support options from the footer", async () => {
     const user = userEvent.setup();
     render(<App />);

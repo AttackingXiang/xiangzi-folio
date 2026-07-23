@@ -1,5 +1,5 @@
 import type {
-  AppConfig, BookmarkNode, BookmarkStyle, Density, ExportBundle, FolderStyle, SearchEngine, ThemeMode,
+  AppConfig, BookmarkNode, BookmarkStyle, Density, ExportBundle, FolderStyle, Language, SearchEngine, ThemeMode,
 } from "../types";
 import { themePresetById } from "./themes";
 
@@ -11,6 +11,7 @@ const folderStyleValues = new Set<FolderStyle>(["directory", "icons", "mixed", "
 const bookmarkStyleValues = new Set<BookmarkStyle>(["row", "tile", "featured", "dock", "compact"]);
 const densityValues = new Set<Density>(["comfortable", "compact"]);
 const searchEngineValues = new Set<SearchEngine>(["google", "bing", "baidu", "duckduckgo"]);
+const languageValues = new Set<Language>(["auto", "zh-CN", "en"]);
 const folderWidthValues = new Set([3, 4, 6, 8, 9, 12]);
 const bookmarkWidthValues = new Set([1.5, 2, 3, 4, 6, 8, 12, 16]);
 const maxBackgroundLength = 3 * 1024 * 1024;
@@ -41,6 +42,7 @@ export const defaultConfig: AppConfig = {
   brandName: "Xiangzi",
   brandTagline: "FOLIO",
   brandLogo: "",
+  language: "auto",
 };
 
 // The browser preview intentionally mirrors the bundled demo tree. These IDs
@@ -104,6 +106,7 @@ export function sanitizeConfig(value: unknown, base: AppConfig = defaultConfig, 
     brandName: safeText(raw.brandName, base.brandName, 80),
     brandTagline: safeText(raw.brandTagline, base.brandTagline, 80),
     brandLogo: safeLocalImage(raw.brandLogo, base.brandLogo, maxLogoLength),
+    language: typeof raw.language === "string" && languageValues.has(raw.language as Language) ? raw.language as Language : base.language,
   };
 }
 

@@ -16,6 +16,7 @@ export type ThemeMode =
   | "ink" | "graphite" | "clarity";
 export type Density = "comfortable" | "compact";
 export type SearchEngine = "google" | "bing" | "baidu" | "duckduckgo";
+export type Language = "auto" | "zh-CN" | "en";
 
 export type AppConfig = {
   version: 1 | 2 | 3;
@@ -40,6 +41,7 @@ export type AppConfig = {
   brandName: string;
   brandTagline: string;
   brandLogo: string;
+  language: Language;
 };
 
 export type ExportBundle = {

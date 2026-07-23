@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Xiangzi Folio 书签主页",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "description": "用现代组件管理 Chrome 原生书签，支持本地缓存、导入导出和双向同步。",
   "permissions": ["bookmarks", "storage", "favicon", "unlimitedStorage"],
   "icons": {

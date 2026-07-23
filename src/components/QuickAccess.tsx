@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { FolderOpen, FolderPlus, LinkSimple, PencilSimple, SlidersHorizontal, Star, Trash } from "@phosphor-icons/react";
 import { parsePresentationTitle } from "../lib/bookmarks";
+import { createTranslator } from "../lib/i18n";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle } from "../types";
 
 type BookmarkDefaults = Pick<EditorValue, "style" | "width" | "rows">;
@@ -57,19 +58,20 @@ function presentationFor(node: BookmarkNode, config: AppConfig): BookmarkDefault
 function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, onMove, onDelete, onRecentClick, onDragStart, onDragEnd }: Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDelete" | "onRecentClick"> & { node: BookmarkNode; parent: BookmarkNode; index: number; preview: QuickDropPreview | null; onDragStart: (event: DragEvent, item: QuickDragItem) => void; onDragEnd: () => void }) {
   const [broken, setBroken] = useState(false);
   const parsed = parsePresentationTitle(node.title);
-  const title = parsed.title || "未命名入口";
+  const t = createTranslator(config.language);
+  const title = parsed.title || t("quick.unnamed");
   const presentation = presentationFor(node, config);
   const host = (() => { try { return new URL(node.url || "").hostname.replace(/^www\./, ""); } catch { return ""; } })();
   const item = { id: node.id, parentId: parent.id, index, title };
   return <Fragment>
-    {preview?.targetId === node.id && <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties}>放到这里</div>}
+    {preview?.targetId === node.id && <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties}>{t("common.dropHere")}</div>}
     <article className={`quick-access__item quick-access__item--${presentation.style} ${presentation.rows === 2 ? "is-tall" : ""} ${editing ? "is-editing" : ""} ${preview?.targetId === node.id ? "is-drop-target" : ""}`} style={{ "--quick-span": presentation.span } as CSSProperties} data-testid={`quick-bookmark-${node.id}`} data-quick-bookmark-id={node.id} data-quick-parent-id={parent.id} data-quick-bookmark-index={index} data-quick-bookmark-title={title} data-quick-span={presentation.span} draggable={editing} onDragStart={(event) => onDragStart(event, item)} onDragEnd={onDragEnd}>
       {editing && <span className="quick-access__drag" aria-hidden="true">⋮⋮</span>}
       <a href={node.url} title={`${title}\n${node.url}`} onClick={(event) => { if (editing) event.preventDefault(); else onRecentClick(node, parent, index); }}>
         <span className="quick-access__icon" aria-hidden="true">{!broken && node.url ? <img src={favicon(node.url)} alt="" onError={() => setBroken(true)} /> : <span>{title.slice(0, 1).toUpperCase()}</span>}</span>
         <span><strong>{title}</strong><small>{host}</small></span>
       </a>
-      {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={`编辑书签 ${title}`} title="编辑书签" onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={`移动书签 ${title}`} title="移动书签" onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={`删除书签 ${title}`} title="删除书签" onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
+      {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={t("action.editBookmark", { title })} title={t("editor.edit") + t("editor.bookmark")} onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveBookmark", { title })} title={t("move.bookmark")} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteBookmark", { title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
     </article>
   </Fragment>;
 }
@@ -85,7 +87,8 @@ type GridProps = Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDel
 };
 
 function QuickGrid({ parent, links, preview, onPreview, onDrop, ...props }: GridProps) {
-  const tail = preview?.targetId === `tail-${parent.id}` ? <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties} aria-label="放到这里，位于本组末尾"><span>放到这里</span></div> : null;
+  const t = createTranslator(props.config.language);
+  const tail = preview?.targetId === `tail-${parent.id}` ? <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties} aria-label={t("common.dropAtEnd")}><span>{t("common.dropHere")}</span></div> : null;
   return <div className="quick-access__grid" onDragEnter={(event) => onPreview(event, parent)} onDragOver={(event) => onPreview(event, parent)} onDrop={onDrop}>{links.map((node, index) => <QuickBookmark key={node.id} node={node} parent={parent} index={node.index ?? index} preview={preview} {...props} />)}{tail}</div>;
 }
 
@@ -102,7 +105,8 @@ function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragE
   const children = folder.children || [];
   const links = children.filter((child) => child.url);
   const folders = children.filter((child) => !child.url);
-  const title = parsePresentationTitle(folder.title).title || "未命名文件夹";
+  const t = createTranslator(props.config.language);
+  const title = parsePresentationTitle(folder.title).title || t("common.unnamedFolder");
   const parentId = folder.parentId || parent.id;
   const index = folder.index ?? (parent.children || []).indexOf(folder);
   const previewExternalDrop = (event: DragEvent) => {
@@ -120,10 +124,10 @@ function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragE
     } catch { /* Invalid transfer data is ignored; source components own their drag payload. */ }
   };
   return <section className={`quick-folder-group ${dropReady ? "is-drop-ready" : ""}`} style={{ "--quick-depth": depth } as CSSProperties} data-folder-id={folder.id} onDragEnter={previewExternalDrop} onDragOver={previewExternalDrop} onDragLeave={(event) => { if (event.currentTarget === event.target) setDropReady(false); }} onDrop={dropExternalItem}>
-    {dropReady && <div className="quick-folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>放到这里</strong><small>移入“{title}”</small></div>}
+    {dropReady && <div className="quick-folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title })}</small></div>}
     <header>
       <div><FolderOpen weight="fill" /><span>{title}</span><small>{links.length}</small></div>
-      {props.editing && <div className="quick-folder-group__actions"><button className="icon-button" type="button" aria-label={`编辑文件夹 ${title}`} title="编辑文件夹" onClick={() => props.onEdit({ id: folder.id, parentId: folder.parentId, type: "folder", title, url: "", folderStyle: "icons" as FolderStyle, width: 4 })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={`移动文件夹 ${title}`} title="移动文件夹" onClick={() => props.onMove(folder)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={`在 ${title} 中新建书签`} title="新建书签" onClick={() => props.onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={`在 ${title} 中新建文件夹`} title="新建子文件夹" onClick={() => props.onNewFolder(folder.id)}><FolderPlus /></button><button className="icon-button danger" type="button" aria-label={`删除文件夹 ${title}`} title="删除文件夹" onClick={() => props.onDelete(folder, parentId, index)}><Trash /></button></div>}
+      {props.editing && <div className="quick-folder-group__actions"><button className="icon-button" type="button" aria-label={t("action.editFolder", { title })} title={t("action.editFolder", { title: "" }).trim()} onClick={() => props.onEdit({ id: folder.id, parentId: folder.parentId, type: "folder", title, url: "", folderStyle: "icons" as FolderStyle, width: 4 })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveFolder", { title })} title={t("move.folder")} onClick={() => props.onMove(folder)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newBookmarkIn", { title })} title={t("app.newBookmark")} onClick={() => props.onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newFolderIn", { title })} title={t("quick.newFolder")} onClick={() => props.onNewFolder(folder.id)}><FolderPlus /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteFolder", { title })} title={t("action.deleteFolder", { title: "" }).trim()} onClick={() => props.onDelete(folder, parentId, index)}><Trash /></button></div>}
     </header>
     {links.length > 0 && <QuickGrid parent={folder} links={links} preview={preview} onDragStart={onDragStart} onDragEnd={onDragEnd} onPreview={onPreview} onDrop={onDrop} {...props} />}
     {folders.map((child) => <QuickFolderGroup key={child.id} folder={child} parent={folder} depth={depth + 1} preview={preview} onDragStart={onDragStart} onDragEnd={onDragEnd} onPreview={onPreview} onDrop={onDrop} {...props} />)}
@@ -131,6 +135,7 @@ function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragE
 }
 
 export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onReorder, onMoveInto }: Props) {
+  const t = createTranslator(config.language);
   const [dragItem, setDragItem] = useState<QuickDragItem | null>(null);
   const [preview, setPreview] = useState<QuickDropPreview | null>(null);
   const [rootDropReady, setRootDropReady] = useState(false);
@@ -171,7 +176,7 @@ export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMo
       const finalBottom = Math.max(...finalRow.map((slot) => slot.bottom));
       const isTail = groupSlots.length > 0 && (event.clientY >= finalBottom || (event.clientY >= finalRowTop && event.clientY < finalBottom && event.clientX >= finalRight));
       if (isTail) {
-        setPreview({ ...dragItem, targetId: `tail-${parent.id}`, targetParentId: parent.id, targetIndex: (parent.children || []).length, targetTitle: "本组末尾", span: Math.max(1, Math.round(dragItem.index >= 0 ? slots.current.find((slot) => slot.targetId === dragItem.id)?.span || 1 : 1)) });
+        setPreview({ ...dragItem, targetId: `tail-${parent.id}`, targetParentId: parent.id, targetIndex: (parent.children || []).length, targetTitle: t("common.groupEnd"), span: Math.max(1, Math.round(dragItem.index >= 0 ? slots.current.find((slot) => slot.targetId === dragItem.id)?.span || 1 : 1)) });
         return;
       }
       setPreview(null); return;
@@ -196,12 +201,12 @@ export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMo
     try {
       const item = JSON.parse(raw) as { id?: string };
       if (!item.id || item.id === folder.id) return;
-      await onMoveInto(item.id, folder.id, "常用入口");
+      await onMoveInto(item.id, folder.id, t("quick.title"));
     } catch { /* Invalid transfer data is ignored; source components own their drag payload. */ }
   };
-  return <section className={`quick-access ${rootDropReady ? "is-drop-ready" : ""}`} aria-label="常用入口" onDragEnter={previewRootDrop} onDragOver={previewRootDrop} onDragLeave={(event) => { if (event.currentTarget === event.target) setRootDropReady(false); }} onDrop={dropIntoRoot}>
-    {rootDropReady && <div className="quick-folder-drop-overlay quick-access__drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>放到这里</strong><small>移入“常用入口”</small></div>}
-    <header><div><Star weight="fill" /><span>常用入口</span></div><div className="quick-access__tools">{editing && <><button type="button" aria-label="在常用入口中新建书签" onClick={() => onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple />新建入口</button><button type="button" aria-label="在常用入口中新建文件夹" onClick={() => onNewFolder(folder.id)}><FolderPlus />新建文件夹</button></>}<button type="button" onClick={onToggleAll}><SlidersHorizontal />全部展开 / 收起</button></div></header>
+  return <section className={`quick-access ${rootDropReady ? "is-drop-ready" : ""}`} aria-label={t("quick.title")} onDragEnter={previewRootDrop} onDragOver={previewRootDrop} onDragLeave={(event) => { if (event.currentTarget === event.target) setRootDropReady(false); }} onDrop={dropIntoRoot}>
+    {rootDropReady && <div className="quick-folder-drop-overlay quick-access__drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title: t("quick.title") })}</small></div>}
+    <header><div><Star weight="fill" /><span>{t("quick.title")}</span></div><div className="quick-access__tools">{editing && <><button type="button" aria-label={t("quick.addBookmark")} onClick={() => onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple />{t("quick.newEntry")}</button><button type="button" aria-label={t("quick.addFolder")} onClick={() => onNewFolder(folder.id)}><FolderPlus />{t("quick.newFolder")}</button></>}<button type="button" onClick={onToggleAll}><SlidersHorizontal />{t("quick.toggleAll")}</button></div></header>
     {links.length > 0 && <QuickGrid parent={folder} links={links} preview={preview} onDragStart={onDragStart} onDragEnd={clearDrag} onPreview={onPreview} onDrop={onDrop} {...shared} />}
     {folders.map((child) => <QuickFolderGroup key={child.id} folder={child} parent={folder} depth={0} preview={preview} onDragStart={onDragStart} onDragEnd={clearDrag} onPreview={onPreview} onDrop={onDrop} {...shared} />)}
   </section>;

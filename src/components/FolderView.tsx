@@ -4,20 +4,12 @@ import {
   GridFour, LinkSimple, ListBullets, PencilSimple, Rows, SquaresFour, Trash,
 } from "@phosphor-icons/react";
 import { bookmarks, collectLinks, countLinks, parsePresentationTitle, setFolderPresentationTitle } from "../lib/bookmarks";
-import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle } from "../types";
+import { createTranslator } from "../lib/i18n";
+import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle, Language } from "../types";
 
-const styleLabels: Record<FolderStyle, string> = {
-  directory: "完整目录", icons: "图标宫格", mixed: "混合组件", dock: "横向速览", stack: "紧凑堆叠", focus: "重点收藏", columns: "双栏阅读",
-};
-
-export const stylesList: Array<{ id: FolderStyle; label: string; icon: typeof ListBullets }> = [
-  { id: "directory", label: styleLabels.directory, icon: ListBullets },
-  { id: "icons", label: styleLabels.icons, icon: GridFour },
-  { id: "mixed", label: styleLabels.mixed, icon: SquaresFour },
-  { id: "dock", label: styleLabels.dock, icon: Rows },
-  { id: "stack", label: styleLabels.stack, icon: ListBullets },
-  { id: "focus", label: styleLabels.focus, icon: SquaresFour },
-  { id: "columns", label: styleLabels.columns, icon: Rows },
+export const stylesList: Array<{ id: FolderStyle; icon: typeof ListBullets }> = [
+  { id: "directory", icon: ListBullets }, { id: "icons", icon: GridFour }, { id: "mixed", icon: SquaresFour }, { id: "dock", icon: Rows },
+  { id: "stack", icon: ListBullets }, { id: "focus", icon: SquaresFour }, { id: "columns", icon: Rows },
 ];
 
 type Props = {
@@ -116,6 +108,7 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDele
   pageSpan?: number;
 }) {
   const [broken, setBroken] = useState(false);
+  const t = createTranslator(config.language);
   const organize = editing;
   const parsed = parsePresentationTitle(node.title);
   const savedStyle = config.bookmarkStyles[node.id];
@@ -134,22 +127,23 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDele
   };
   return (
     <div className={`bookmark bookmark--${markedVariant} ${compact ? "bookmark--compact" : ""} ${rows === 2 ? "bookmark--tall" : ""} ${organize ? "is-organizing" : ""} ${dropTarget ? "is-drop-target" : ""}`} style={{ "--item-span": itemWidth } as CSSProperties} draggable={organize} onDragStart={beginDrag} onDragEnd={() => { activeDragItem = null; activeDropSlots = []; window.dispatchEvent(new Event(dragEndEvent)); }} data-testid={`bookmark-${node.id}`} data-bookmark-id={node.id} data-parent-id={parent.id} data-bookmark-index={index} data-bookmark-title={parsed.title}>
-      {organize && <span className="bookmark__drag" title="拖动排序" aria-label="拖动排序"><DotsSixVertical weight="bold" /></span>}
+      {organize && <span className="bookmark__drag" title={t("action.dragSort")} aria-label={t("action.dragSort")}><DotsSixVertical weight="bold" /></span>}
       <a href={node.url} draggable={false} className="bookmark__link" title={`${parsed.title}\n${node.url}`} onClick={(event) => { if (editing) event.preventDefault(); else onRecentClick(node, parent, index); }}>
         <span className="favicon" aria-hidden="true">
           {!broken && node.url ? <img src={favicon(node.url)} alt="" onError={() => setBroken(true)} /> : <span>{parsed.title.slice(0, 1).toUpperCase()}</span>}
         </span>
-        <span className="bookmark__copy"><strong>{parsed.title || "未命名"}</strong>{markedVariant === "featured" && <small>{node.url?.replace(/^https?:\/\//, "").split("/")[0]}</small>}</span>
+        <span className="bookmark__copy"><strong>{parsed.title || t("common.unnamed")}</strong>{markedVariant === "featured" && <small>{node.url?.replace(/^https?:\/\//, "").split("/")[0]}</small>}</span>
         {markedVariant === "row" && <ArrowSquareOut className="bookmark__open" weight="bold" />}
       </a>
       {organize && (
-        <div className="bookmark__actions"><button className="icon-button" aria-label={`编辑书签 ${parsed.title}`} title="编辑书签" onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows }); }}><PencilSimple /></button><button className="icon-button" aria-label={`移动书签 ${parsed.title}`} title="移动书签" onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button><button className="icon-button danger" aria-label={`删除书签 ${parsed.title}`} title="删除书签" onClick={(event) => { event.preventDefault(); onDelete(node, parent.id, index); }}><Trash /></button></div>
+        <div className="bookmark__actions"><button className="icon-button" aria-label={t("action.editBookmark", { title: parsed.title })} title={t("action.editBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows }); }}><PencilSimple /></button><button className="icon-button" aria-label={t("action.moveBookmark", { title: parsed.title })} title={t("move.bookmark")} onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button><button className="icon-button danger" aria-label={t("action.deleteBookmark", { title: parsed.title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onDelete(node, parent.id, index); }}><Trash /></button></div>
       )}
     </div>
   );
 }
 
 export function FolderView({ node, config, editing, level = 0, block = false, siblingIndex = node.index ?? 0, pageSpan = 12, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick }: Props) {
+  const t = createTranslator(config.language);
   const [menu, setMenu] = useState(false);
   const [dropReady, setDropReady] = useState(false);
   const [bookmarkDropPreview, setBookmarkDropPreview] = useState<BookmarkDropPreview | null>(null);
@@ -221,8 +215,8 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
     const targetIndex = item.parentId === node.parentId && item.index < siblingIndex ? siblingIndex - 1 : siblingIndex;
     try {
       await bookmarks.move(item.id, { parentId: node.parentId, index: targetIndex });
-      await onRefresh(); onToast("文件夹顺序已同步到 Chrome 书签");
-    } catch (reason) { onToast(reason instanceof Error ? reason.message : "文件夹移动失败"); }
+      await onRefresh(); onToast(t("folder.orderSynced"));
+    } catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.moveError")); }
   };
   const dropOnFolderHeader = async (event: DragEvent) => {
     const raw = event.dataTransfer.getData(dragMime);
@@ -245,17 +239,17 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   };
   const toggle = async () => {
     const nextCollapsed = !collapsed;
-    try { await syncPresentation({ style, width: presentationWidth, collapsed: nextCollapsed }, nextCollapsed ? "文件夹已收起，样式已同步" : "文件夹已展开，样式已同步"); }
-    catch (reason) { onToast(reason instanceof Error ? reason.message : "同步展示设置失败"); }
+    try { await syncPresentation({ style, width: presentationWidth, collapsed: nextCollapsed }, t(nextCollapsed ? "folder.collapsed" : "folder.expanded")); }
+    catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.syncError")); }
   };
   const changeStyle = async (next: FolderStyle) => {
     setMenu(false);
-    try { await syncPresentation({ style: next, width: presentationWidth, collapsed }, "显示样式已同步到 Chrome 书签"); }
-    catch (reason) { onToast(reason instanceof Error ? reason.message : "同步展示设置失败"); }
+    try { await syncPresentation({ style: next, width: presentationWidth, collapsed }, t("folder.styleSynced")); }
+    catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.syncError")); }
   };
   const changeWidth = async (next: number) => {
-    try { await syncPresentation({ style, width: next, collapsed }, "文件夹宽度已同步到 Chrome 书签"); }
-    catch (reason) { onToast(reason instanceof Error ? reason.message : "同步展示设置失败"); }
+    try { await syncPresentation({ style, width: next, collapsed }, t("folder.widthSynced")); }
+    catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.syncError")); }
   };
   const dropInto = async (event: DragEvent) => {
     if (!organize) return;
@@ -263,8 +257,8 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
     event.preventDefault(); event.stopPropagation(); setDropReady(false); window.dispatchEvent(new Event(dragEndEvent));
     const item = JSON.parse(raw) as { id: string };
     if (item.id === effectiveParent.id) return;
-    try { activeDragItem = null; setBookmarkDropPreview(null); await bookmarks.move(item.id, { parentId: effectiveParent.id }); await onRefresh(); onToast(`已移入“${parsedFolder.title}”`); }
-    catch (reason) { onToast(reason instanceof Error ? reason.message : "移动失败"); }
+    try { activeDragItem = null; setBookmarkDropPreview(null); await bookmarks.move(item.id, { parentId: effectiveParent.id }); await onRefresh(); onToast(t("notice.movedInto", { title: parsedFolder.title })); }
+    catch (reason) { onToast(reason instanceof Error ? reason.message : t("notice.moveError")); }
   };
   const dropAtBookmarkPreview = async (event: DragEvent) => {
     if (activeDragItem?.type !== "bookmark") return;
@@ -275,8 +269,8 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
     try {
       activeDragItem = null; setBookmarkDropPreview(null); setDropReady(false);
       await bookmarks.move(preview.sourceId, { parentId: preview.targetParentId, index: targetIndex });
-      await onRefresh(); onToast(`已放到“${preview.targetTitle}”的位置，原书签顺延`);
-    } catch (reason) { onToast(reason instanceof Error ? reason.message : "书签排序失败"); }
+      await onRefresh(); onToast(t("folder.bookmarkReordered", { title: preview.targetTitle }));
+    } catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.bookmarkReorderError")); }
   };
   const previewBookmarkAtPointer = (event: DragEvent) => {
     const item = activeDragItem;
@@ -288,7 +282,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
         window.dispatchEvent(new CustomEvent(dragPreviewEvent, { detail: node.id }));
         setBookmarkDropPreview({
           sourceId: item.id, sourceParentId: item.parentId, sourceIndex: item.index,
-          targetId: `tail-${node.id}`, targetParentId: effectiveParent.id, targetIndex: children.length, targetTitle: "本组末尾",
+          targetId: `tail-${node.id}`, targetParentId: effectiveParent.id, targetIndex: children.length, targetTitle: t("common.groupEnd"),
           width: item.width || 1.5, rows: item.rows || 1,
         });
         return;
@@ -305,33 +299,33 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const bookmarkGridDrag = { onDragEnter: previewBookmarkAtPointer, onDragOver: previewBookmarkAtPointer, onDrop: dropAtBookmarkPreview };
   const common = { config, editing, pageSpan: componentSpan, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick };
   const renderLink = (child: BookmarkNode, index: number, variant: "row" | "tile" | "featured" | "dock", defaultWidth?: number) => <Fragment key={`${child.id}-${index}`}>
-    {bookmarkDropPreview?.targetId === child.id && <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} />}
+    {bookmarkDropPreview?.targetId === child.id && <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} language={config.language} />}
     <LinkItem node={child} parent={parentFor(child)} index={child.index ?? index} config={config} variant={variant} defaultWidth={defaultWidth} pageSpan={componentSpan} editing={editing} onEdit={onEdit} onMove={onMove} onDelete={onDelete} onRecentClick={onRecentClick} dropTarget={bookmarkDropPreview?.targetId === child.id} />
   </Fragment>;
-  const renderTail = (variant: "row" | "tile" | "featured" | "dock") => bookmarkDropPreview?.targetId === `tail-${node.id}` ? <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} /> : null;
+  const renderTail = (variant: "row" | "tile" | "featured" | "dock") => bookmarkDropPreview?.targetId === `tail-${node.id}` ? <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} language={config.language} /> : null;
   return (
     <section className={`folder ${block ? "folder--block" : "folder--nested"} folder--${displayStyle} ${collapsed ? "is-collapsed" : ""} ${links.length > 12 ? "is-dense" : ""} ${dropReady && !bookmarkDropPreview ? "is-drop-ready" : ""}`} style={{ "--page-columns": componentSpan, ...(!block ? { "--folder-span": renderedFolderSpan } : {}) } as React.CSSProperties} data-folder-id={node.id} data-native-title={node.title} onDragEnter={previewFolderDrop} onDragLeave={() => setDropReady(false)} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
-      {organize && dropReady && !bookmarkDropPreview && <div className="folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>放到这里</strong><small>移入“{parsedFolder.title}”</small></div>}
+      {organize && dropReady && !bookmarkDropPreview && <div className="folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title: parsedFolder.title })}</small></div>}
       <header className="folder__header" onDragEnter={previewFolderDrop} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropOnFolderHeader}>
-        {organize && !virtual && <span className="folder__drag" draggable onDragStart={beginFolderDrag} onDragEnd={() => { activeDragItem = null; setDropReady(false); window.dispatchEvent(new Event(dragEndEvent)); }} title="拖动文件夹排序或移入其他文件夹" aria-label={`拖动文件夹 ${parsedFolder.title}`}><DotsSixVertical weight="bold" /></span>}
+        {organize && !virtual && <span className="folder__drag" draggable onDragStart={beginFolderDrag} onDragEnd={() => { activeDragItem = null; setDropReady(false); window.dispatchEvent(new Event(dragEndEvent)); }} title={t("folder.drag")} aria-label={t("folder.dragAria", { title: parsedFolder.title })}><DotsSixVertical weight="bold" /></span>}
         <button className="folder__title" onClick={toggle} aria-expanded={!collapsed}>
           {collapsed ? <CaretRight weight="bold" /> : <CaretDown weight="bold" />}
           {collapsed ? <Folder weight="fill" /> : <FolderOpen weight="fill" />}
-          <span>{parsedFolder.title || "未命名文件夹"}</span>
+          <span>{parsedFolder.title || t("common.unnamedFolder")}</span>
           <small>{countLinks(node)}</small>
         </button>
-        {organize && <span className="drop-hint">拖入此文件夹</span>}
+        {organize && <span className="drop-hint">{t("folder.dropHint")}</span>}
         {editing && (
           <div ref={styleActions} className="folder__actions" onKeyDown={(event) => { if (event.key === "Escape" && menu) { event.preventDefault(); setMenu(false); styleTrigger.current?.focus(); } }}>
-            {!virtual && <><button className="icon-button" title="编辑文件夹" aria-label={`编辑文件夹 ${parsedFolder.title}`} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed })}><PencilSimple /></button><button className="icon-button" title="移动文件夹" aria-label={`移动文件夹 ${parsedFolder.title}`} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title="新建书签" aria-label={`在 ${parsedFolder.title} 中新建书签`} onClick={() => onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><LinkSimple /></button><button className="icon-button" title="新建子文件夹" aria-label={`在 ${parsedFolder.title} 中新建文件夹`} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
-            <button ref={styleTrigger} className="icon-button" title="设置显示样式" aria-label={`设置 ${parsedFolder.title} 的显示样式`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><DotsThree weight="bold" /></button>
-            {menu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">展示样式</small>{stylesList.map((item) => <button role="menuitemradio" aria-checked={style === item.id} key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{item.label}</button>)}{!block && <><small role="presentation" className="style-menu__label">内部占位</small><div role="group" aria-label="内部占位" className="style-menu__widths">{[{ value: 12, label: "整行" }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button role="menuitemradio" aria-checked={nestedWidth === item.value} key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}</div>}
-            {!virtual && <button className="icon-button danger" title="删除文件夹" aria-label={`删除文件夹 ${parsedFolder.title}`} onClick={() => onDelete(node, node.parentId || effectiveParent.id, siblingIndex)}><Trash /></button>}
+            {!virtual && <><button className="icon-button" title={t("action.editFolder", { title: "" }).trim()} aria-label={t("action.editFolder", { title: parsedFolder.title })} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed })}><PencilSimple /></button><button className="icon-button" title={t("move.folder")} aria-label={t("action.moveFolder", { title: parsedFolder.title })} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title={t("app.newBookmark")} aria-label={t("action.newBookmarkIn", { title: parsedFolder.title })} onClick={() => onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><LinkSimple /></button><button className="icon-button" title={t("quick.newFolder")} aria-label={t("action.newFolderIn", { title: parsedFolder.title })} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
+            <button ref={styleTrigger} className="icon-button" title={t("action.style")} aria-label={`${t("action.style")} ${parsedFolder.title}`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><DotsThree weight="bold" /></button>
+            {menu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">{t("editor.appearance")}</small>{stylesList.map((item) => <button role="menuitemradio" aria-checked={style === item.id} key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{t(`folder.style.${item.id}`)}</button>)}{!block && <><small role="presentation" className="style-menu__label">{t("folder.internalWidth")}</small><div role="group" aria-label={t("folder.internalWidth")} className="style-menu__widths">{[{ value: 12, label: t("editor.fullRow") }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button role="menuitemradio" aria-checked={nestedWidth === item.value} key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}</div>}
+            {!virtual && <button className="icon-button danger" title={t("action.deleteFolder", { title: "" }).trim()} aria-label={t("action.deleteFolder", { title: parsedFolder.title })} onClick={() => onDelete(node, node.parentId || effectiveParent.id, siblingIndex)}><Trash /></button>}
           </div>
         )}
       </header>
       {!collapsed && <div className="folder__body" onDragEnter={previewFolderDrop} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
-        {children.length === 0 && <button className="empty-folder" onClick={() => editing && onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><Folder />空文件夹{editing && " · 添加书签"}</button>}
+        {children.length === 0 && <button className="empty-folder" onClick={() => editing && onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><Folder />{t("folder.empty")}{editing && ` · ${t("folder.addBookmark")}`}</button>}
         {(displayStyle === "directory" || displayStyle === "stack" || displayStyle === "columns") && <div className="directory-grid" {...bookmarkGridDrag}>{children.map((child, index) => child.url
           ? renderLink(child, child.index ?? index, "row", displayStyle === "columns" ? 6 : 4)
           : <FolderView key={child.id} node={child} siblingIndex={index} level={level + 1} {...common} />)}{renderTail("row")}</div>}
@@ -340,17 +334,19 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
         {displayStyle === "dock" && directLinks.length > 0 && <div className="dock-list" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "dock"))}{renderTail("dock")}</div>}
         {displayStyle === "focus" && directLinks.length > 0 && <div className="focus-list" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index < 2 ? "featured" : "row"))}{renderTail("row")}</div>}
         {displayStyle !== "directory" && displayStyle !== "stack" && displayStyle !== "columns" && childFolders.length > 0 && <div className="folder-groups">{childFolders.map((child) => <FolderView key={child.id} node={child} siblingIndex={children.indexOf(child)} level={level + 1} {...common} />)}</div>}
-        {organize && <div className="folder-drop-zone" onDragEnter={previewFolderDrop} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={dropInto}><FolderOpen />拖到此区域，移入“{parsedFolder.title}”</div>}
+        {organize && <div className="folder-drop-zone" onDragEnter={previewFolderDrop} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={dropInto}><FolderOpen />{t("folder.dropZone", { title: parsedFolder.title })}</div>}
       </div>}
     </section>
   );
 }
 
-function BookmarkDropPlaceholder({ preview, variant }: { preview: BookmarkDropPreview; variant: "row" | "tile" | "featured" | "dock" }) {
-  return <div className={`bookmark bookmark-drop-placeholder bookmark--${variant} ${preview.rows === 2 ? "bookmark--tall" : ""}`} style={{ "--item-span": preview.width } as CSSProperties} aria-label={`放到这里，位于 ${preview.targetTitle} 之前`}><span>放到这里</span></div>;
+function BookmarkDropPlaceholder({ preview, variant, language }: { preview: BookmarkDropPreview; variant: "row" | "tile" | "featured" | "dock"; language: Language }) {
+  const t = createTranslator(language);
+  return <div className={`bookmark bookmark-drop-placeholder bookmark--${variant} ${preview.rows === 2 ? "bookmark--tall" : ""}`} style={{ "--item-span": preview.width } as CSSProperties} aria-label={t("folder.dropBefore", { title: preview.targetTitle })}><span>{t("common.dropHere")}</span></div>;
 }
 
-export function ResizeHandle({ width, onWidth, onCommit }: { width: number; onWidth: (value: number) => void; onCommit?: (value: number) => void }) {
+export function ResizeHandle({ width, language, onWidth, onCommit }: { width: number; language: Language; onWidth: (value: number) => void; onCommit?: (value: number) => void }) {
+  const t = createTranslator(language);
   const begin = (event: PointerEvent<HTMLButtonElement>) => {
     event.preventDefault(); event.stopPropagation();
     const container = event.currentTarget.closest(".bookmark-grid");
@@ -366,5 +362,5 @@ export function ResizeHandle({ width, onWidth, onCommit }: { width: number; onWi
     const finish = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); onCommit?.(latest); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish);
   };
-  return <button className="resize-handle" onPointerDown={begin} title={`拖动调整宽度 · 当前 ${width}/12`}><span /></button>;
+  return <button className="resize-handle" onPointerDown={begin} title={t("folder.resize", { width })}><span /></button>;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countLinks, exportBookmarksHtml, normalizeUrl, parseBookmarksHtml, parsePresentationTitle, setBookmarkPresentationTitle, setFolderPresentationTitle } from "./bookmarks";
+import { countLinks, exportBookmarksHtml, isQuickAccessFolder, normalizeUrl, parseBookmarksHtml, parsePresentationTitle, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./bookmarks";
 import type { BookmarkStyle, FolderStyle } from "../types";
 import { demoTree } from "../data/demo";
 
@@ -68,5 +68,15 @@ describe("bookmark utilities", () => {
       for (const width of [undefined, 1.5, 2, 3, 4, 6, 8, 12, 16]) for (const rows of [1, 2] as const) bookmarkMarkers.add(setBookmarkPresentationTitle("x", { style, width, rows }).slice(-3));
     }
     expect(new Set([...folderMarkers, ...bookmarkMarkers]).size).toBe(188);
+  });
+
+  it("identifies quick access by a portable role suffix regardless of its visible name", () => {
+    const chinese = { id: "q1", title: setQuickAccessTitle("常用入口"), children: [] };
+    const english = { id: "q2", title: setQuickAccessTitle("My launchpad"), children: [] };
+    expect(chinese.title).toMatch(/^常用入口~[A-Za-z0-9_-]{2}$/);
+    expect(parsePresentationTitle(english.title)).toEqual({ title: "My launchpad", role: "quick-access" });
+    expect(isQuickAccessFolder(chinese)).toBe(true);
+    expect(isQuickAccessFolder(english)).toBe(true);
+    expect(isQuickAccessFolder({ id: "q3", title: "常用入口", children: [] })).toBe(false);
   });
 });

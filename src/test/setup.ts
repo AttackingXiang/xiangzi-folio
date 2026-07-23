@@ -11,3 +11,5 @@ Object.defineProperty(window, "matchMedia", {
 
 class ResizeObserverMock { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver = ResizeObserverMock;
+
+Object.defineProperty(navigator, "language", { configurable: true, value: "zh-CN" });
