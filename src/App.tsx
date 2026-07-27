@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
-  ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
+  ArrowsClockwise, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
   Eye, EyeSlash, FolderPlus, GearSix, Heart, LinkSimple, MagnifyingGlass,
   PencilSimple, SquaresFour, UploadSimple, X,
 } from "@phosphor-icons/react";
@@ -27,6 +27,7 @@ const engines: Record<SearchEngine, { label: string; action: string; host: strin
 };
 
 const widthPresets = [{ value: 12, key: "editor.fullRow" }, { value: 9, label: "3/4" }, { value: 8, label: "2/3" }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }];
+const productMark = "/icons/brand-mark.png";
 
 function flattenBlocks(roots: BookmarkNode[]): BookmarkNode[] {
   const links = roots.flatMap((root) => (root.children || []).filter((item) => item.url));
@@ -396,12 +397,13 @@ export function App() {
     engineOptions.current[next]?.focus();
   };
   const appStyle = { "--user-accent": config.accent, "--glass-blur": `${config.glassStrength}px`, "--shade": `${config.backgroundShade / 100}` } as React.CSSProperties;
+  const brandLogo = config.brandLogo || productMark;
 
   return <div className="app" data-theme={config.theme} data-density={config.density} style={appStyle}>
     <div className={`app-background ${config.backgroundImage ? "has-image" : ""}`} style={config.backgroundImage ? { backgroundImage: `url(${config.backgroundImage})` } : undefined} />
     <header className="topbar glass-surface">
       <div className={`brand ${editing ? "brand--editing" : ""}`}>
-        {editing ? <button className="brand__mark" type="button" aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}>{config.brandLogo ? <img src={config.brandLogo} alt="" /> : <BookmarkSimple weight="fill" />}</button> : <span className="brand__mark" aria-hidden="true">{config.brandLogo ? <img src={config.brandLogo} alt="" /> : <BookmarkSimple weight="fill" />}</span>}
+        {editing ? <button className="brand__mark" type="button" aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><img src={brandLogo} alt="" /></button> : <span className="brand__mark" aria-hidden="true"><img src={brandLogo} alt="" /></span>}
         <span className="brand__copy">{editing ? <><input aria-label={t("app.brandName")} value={config.brandName} onChange={(event) => onConfig((value) => ({ ...value, brandName: event.target.value }))} placeholder={t("app.brandName")} /><input aria-label={t("app.brandTagline")} value={config.brandTagline} onChange={(event) => onConfig((value) => ({ ...value, brandTagline: event.target.value }))} placeholder={t("app.taglinePlaceholder")} /></> : <><strong>{config.brandName}</strong><small>{config.brandTagline}</small></>}</span>
         {editing && <span className="brand__tools"><button type="button" className="icon-button" title={t("app.replaceLogo")} aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><UploadSimple /></button><button type="button" className="icon-button danger" title={t("app.deleteLogo")} aria-label={t("app.deleteLogo")} onClick={() => onConfig((value) => ({ ...value, brandLogo: "" }))}><X /></button><input ref={brandLogoInput} hidden type="file" accept="image/*" onChange={pickBrandLogo} /></span>}
       </div>
@@ -422,7 +424,7 @@ export function App() {
     <main id="top" className="content">
       {quickFolder && <QuickAccess folder={quickFolder} config={config} editing={editing} onToggleAll={toggleAll} onEdit={setEditor} onMove={(node) => setMoveTarget(node)} onDelete={deleteNode} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onReorder={reorderQuickBookmark} onMoveInto={moveItemIntoQuickFolder} />}
       {error && <div className="error-banner">{error}<button onClick={refresh}>{t("app.retry")}</button></div>}
-      {!loading && blocks.length === 0 && <div className="empty-state glass-surface"><BookmarkSimple weight="duotone" /><h2>{t("app.emptyTitle")}</h2><p>{t("app.emptyHint")}</p><button className="button button--primary" onClick={() => setEditing(true)}>{t("app.start")}</button></div>}
+      {!loading && blocks.length === 0 && <div className="empty-state glass-surface"><img className="product-mark product-mark--empty" src={productMark} alt="" /><h2>{t("app.emptyTitle")}</h2><p>{t("app.emptyHint")}</p><button className="button button--primary" onClick={() => setEditing(true)}>{t("app.start")}</button></div>}
       <div className={`bookmark-grid ${editing ? "is-layout-editing" : ""}`}>
         {editing && <div className="grid-guide" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span key={index} />)}</div>}
         {blocks.map((block) => {
@@ -439,7 +441,7 @@ export function App() {
           </MasonryArticle>;
         })}
       </div>
-      <footer className="page-footer"><span><BookmarkSimple weight="fill" />Xiangzi Folio</span><p>{t("app.footer")}</p><button className="footer-support" type="button" onClick={() => setSupportOpen(true)}><Heart weight="fill" />{t("support.open")}</button></footer>
+      <footer className="page-footer"><span><img className="product-mark product-mark--footer" src={productMark} alt="" />Xiangzi Folio</span><p>{t("app.footer")}</p><button className="footer-support" type="button" onClick={() => setSupportOpen(true)}><Heart weight="fill" />{t("support.open")}</button></footer>
     </main>
     {settings && editing && <><button className="settings-scrim" data-dialog-dismiss aria-hidden="true" tabIndex={-1} onClick={() => setSettings(false)} /><SettingsPanel config={config} onConfig={onConfig} onClose={() => setSettings(false)} onError={notify} /></>}
     <MoveDialog node={moveTarget} roots={roots} language={config.language} onClose={() => setMoveTarget(null)} onMove={moveNode} />

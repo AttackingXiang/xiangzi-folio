@@ -54,9 +54,11 @@ a { color: inherit; }
   padding: 12px 18px 12px 22px; border-radius: 29px;
 }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; width: fit-content; }
-.brand__mark { display: grid; place-items: center; width: 46px; height: 46px; padding: 0; border: 0; border-radius: 13px; background: var(--accent); color: #fff; box-shadow: 0 8px 19px color-mix(in srgb, var(--accent) 34%, transparent); transform: rotate(-3deg); overflow: hidden; cursor: default; }
-.brand__mark svg { width: 22px; height: 22px; }
-.brand__mark img { width: 100%; height: 100%; object-fit: cover; }
+.brand__mark { display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 14px; background: transparent; color: #fff; filter: drop-shadow(0 9px 16px color-mix(in srgb, var(--accent) 26%, transparent)); overflow: visible; cursor: default; }
+.brand__mark img { width: 100%; height: 100%; object-fit: contain; }
+.product-mark { display: inline-block; object-fit: contain; }
+.product-mark--empty { width: 64px; height: 64px; filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--accent) 24%, transparent)); }
+.product-mark--footer { width: 18px; height: 18px; flex: 0 0 18px; }
 .brand__copy { display: grid; line-height: 1; min-width: 0; }
 .brand strong { font-family: Georgia, "Songti SC", serif; font-size: 25px; letter-spacing: -.6px; }
 .brand small { margin-top: 5px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 2.8px; }
