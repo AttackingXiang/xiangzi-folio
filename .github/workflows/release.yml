@@ -12,9 +12,39 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
-      version: ${{ steps.package.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
+      - id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            latest_tag="$(git ls-remote --tags --refs origin 'v*' | awk -F/ '{ print $NF }' | sort -V | tail -n 1)"
+            latest_version="${latest_tag#v}"
+            if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest_version="$(node -p "require('./package.json').version")"
+            fi
+            IFS=. read -r major minor patch <<< "$latest_version"
+            version="${major}.${minor}.$((patch + 1))"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+
+          node - "$version" <<'NODE'
+          const fs = require("fs");
+          const version = process.argv[2];
+          for (const file of ["package.json", "package-lock.json", "public/manifest.json"]) {
+            const json = JSON.parse(fs.readFileSync(file, "utf8"));
+            json.version = version;
+            if (json.packages?.[""]) json.packages[""].version = version;
+            fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+          }
+          NODE
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${version}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -24,11 +54,10 @@ jobs:
       - run: npm run build
       - id: package
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="${{ steps.version.outputs.version }}"
           asset_name="xiangzi-folio-extension-v${version}.zip"
           mkdir -p release
           (cd dist && zip -qr -X "../release/${asset_name}" .)
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "asset_name=${asset_name}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
@@ -51,16 +80,10 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           ASSET_NAME: ${{ needs.verify-and-package.outputs.asset_name }}
-          VERSION: ${{ needs.verify-and-package.outputs.version }}
+          RELEASE_TAG: ${{ needs.verify-and-package.outputs.release_tag }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            release_tag="$GITHUB_REF_NAME"
-          else
-            release_tag="v${VERSION}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists; refusing to overwrite it." >&2
+            exit 1
           fi
-
-          if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release upload "$release_tag" "release/${ASSET_NAME}" --clobber
-          else
-            gh release create "$release_tag" "release/${ASSET_NAME}" --target "$GITHUB_SHA" --title "Xiangzi Folio ${release_tag}" --generate-notes
-          fi
+          gh release create "$RELEASE_TAG" "release/${ASSET_NAME}" --target "$GITHUB_SHA" --title "Xiangzi Folio ${RELEASE_TAG}" --generate-notes
