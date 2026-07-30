@@ -87,3 +87,59 @@ jobs:
             exit 1
           fi
           gh release create "$RELEASE_TAG" "release/${ASSET_NAME}" --target "$GITHUB_SHA" --title "Xiangzi Folio ${RELEASE_TAG}" --generate-notes
+
+  sync-to-gitee:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [verify-and-package, publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: xiangzi-folio-extension
+          path: release
+      # Mirrors only the release binary to Gitee (gitee.com/tlqgyx/xiangzi-folio),
+      # not the source tree, so mainland China users have a fast download path.
+      # Requires the GITEE_TOKEN repo secret (a Gitee personal access token with
+      # repo scope) and at least one existing commit in the Gitee repo (add a
+      # README via the Gitee web UI once) so releases have a commit to attach to.
+      - env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          ASSET_NAME: ${{ needs.verify-and-package.outputs.asset_name }}
+          RELEASE_TAG: ${{ needs.verify-and-package.outputs.release_tag }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "::warning::GITEE_TOKEN secret is not set; skipping Gitee sync."
+            exit 0
+          fi
+
+          repo="tlqgyx/xiangzi-folio"
+          api="https://gitee.com/api/v5/repos/${repo}"
+
+          default_branch=$(curl -sf "${api}?access_token=${GITEE_TOKEN}" | jq -r '.default_branch // empty')
+          if [ -z "$default_branch" ]; then
+            echo "::error::Gitee repo ${repo} has no commits yet. Add an initial file (e.g. README) via the Gitee web UI, then re-run this job."
+            exit 1
+          fi
+
+          release_id=$(curl -s "${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty')
+
+          if [ -n "$release_id" ]; then
+            echo "Gitee release ${RELEASE_TAG} already exists (id=${release_id})."
+          else
+            release_id=$(curl -sf -X POST "${api}/releases" \
+              -H "Content-Type: application/json;charset=UTF-8" \
+              -d "$(jq -n \
+                --arg token "$GITEE_TOKEN" \
+                --arg tag "$RELEASE_TAG" \
+                --arg branch "$default_branch" \
+                --arg name "Xiangzi Folio ${RELEASE_TAG}" \
+                --arg body "Mirrored from GitHub release ${RELEASE_TAG}." \
+                '{access_token: $token, tag_name: $tag, name: $name, target_commitish: $branch, body: $body}')" \
+              | jq -r '.id')
+            echo "Created Gitee release ${RELEASE_TAG} (id=${release_id})."
+          fi
+
+          curl -sf -X POST "${api}/releases/${release_id}/attach_files" \
+            -F "access_token=${GITEE_TOKEN}" \
+            -F "file=@release/${ASSET_NAME}" > /dev/null
+          echo "Uploaded ${ASSET_NAME} to Gitee release ${RELEASE_TAG}."
