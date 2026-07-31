@@ -212,7 +212,23 @@ function decodeBookmarkMarker(value: string) {
   return { marker: style, width, rows: (code & 64) ? 2 as const : 1 as const };
 }
 
-export function parsePresentationTitle(value: string): { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole } {
+type ParsedPresentationTitle = { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole };
+// Pure function of `value`, but called repeatedly for the same node across
+// nested renders (folder style calc, each LinkItem, countLinks display, drag
+// previews, ...) with no built-in memoization. Cache by the raw title string
+// so re-renders and drag-driven state churn don't repeatedly re-run the
+// short-marker decoding and regex matching for titles that haven't changed.
+const presentationTitleCache = new Map<string, ParsedPresentationTitle>();
+
+export function parsePresentationTitle(value: string): ParsedPresentationTitle {
+  const cached = presentationTitleCache.get(value);
+  if (cached) return cached;
+  const result = computePresentationTitle(value);
+  presentationTitleCache.set(value, result);
+  return result;
+}
+
+function computePresentationTitle(value: string): ParsedPresentationTitle {
   const short = decodeShortMarker(value);
   const compact = decodeCompactMarker(value);
   const bookmarkCompact = decodeBookmarkMarker(value);

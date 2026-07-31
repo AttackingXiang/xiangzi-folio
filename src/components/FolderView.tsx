@@ -4,7 +4,9 @@ import {
   GridFour, LinkSimple, ListBullets, PencilSimple, Rows, SquaresFour, Trash,
 } from "@phosphor-icons/react";
 import { bookmarks, collectLinks, countLinks, parsePresentationTitle, setFolderPresentationTitle } from "../lib/bookmarks";
+import { favicon } from "../lib/favicon";
 import { createTranslator } from "../lib/i18n";
+import { openBookmarkLink } from "../lib/navigation";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle, Language } from "../types";
 
 export const stylesList: Array<{ id: FolderStyle; icon: typeof ListBullets }> = [
@@ -28,7 +30,7 @@ type Props = {
   onNewFolder: (parentId: string) => void;
   onNewBookmark: (parentId: string, defaults: Pick<EditorValue, "style" | "width" | "rows">) => void;
   onDelete: (node: BookmarkNode, parentId: string, index: number) => void;
-  onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => void;
+  onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => Promise<void>;
 };
 
 const dragMime = "application/x-xiangzi-folio-bookmark";
@@ -80,14 +82,6 @@ function bookmarkTailSlotAt(parentId: string, clientX: number, clientY: number) 
   return y >= finalBottom || (y >= finalRowTop && y < finalBottom && x >= finalRight);
 }
 
-function favicon(url = "") {
-  if (typeof chrome !== "undefined" && chrome.runtime?.id) {
-    return chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`);
-  }
-  try { return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(new URL(url).origin)}&sz=64`; }
-  catch { return ""; }
-}
-
 function newBookmarkDefaults(style: FolderStyle): Pick<EditorValue, "style" | "width" | "rows"> {
   if (style === "icons" || style === "mixed") return { style: "tile", width: 1.5, rows: 1 };
   if (style === "dock") return { style: "dock", width: 3, rows: 1 };
@@ -128,7 +122,7 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDele
   return (
     <div className={`bookmark bookmark--${markedVariant} ${compact ? "bookmark--compact" : ""} ${rows === 2 ? "bookmark--tall" : ""} ${organize ? "is-organizing" : ""} ${dropTarget ? "is-drop-target" : ""}`} style={{ "--item-span": itemWidth } as CSSProperties} draggable={organize} onDragStart={beginDrag} onDragEnd={() => { activeDragItem = null; activeDropSlots = []; window.dispatchEvent(new Event(dragEndEvent)); }} data-testid={`bookmark-${node.id}`} data-bookmark-id={node.id} data-parent-id={parent.id} data-bookmark-index={index} data-bookmark-title={parsed.title}>
       {organize && <span className="bookmark__drag" title={t("action.dragSort")} aria-label={t("action.dragSort")}><DotsSixVertical weight="bold" /></span>}
-      <a href={node.url} draggable={false} className="bookmark__link" title={`${parsed.title}\n${node.url}`} onClick={(event) => { if (editing) event.preventDefault(); else onRecentClick(node, parent, index); }}>
+      <a href={node.url} draggable={false} className="bookmark__link" title={`${parsed.title}\n${node.url}`} onClick={(event) => { if (editing) { event.preventDefault(); return; } void openBookmarkLink(event, node.url, () => onRecentClick(node, parent, index)); }}>
         <span className="favicon" aria-hidden="true">
           {!broken && node.url ? <img src={favicon(node.url)} alt="" onError={() => setBroken(true)} /> : <span>{parsed.title.slice(0, 1).toUpperCase()}</span>}
         </span>

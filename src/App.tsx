@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
-  ArrowsClockwise, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
+  ArrowsClockwise, BookmarkSimple, Browsers, CaretDown, Check, Database, DownloadSimple, Export,
   Eye, EyeSlash, FolderPlus, GearSix, Heart, LinkSimple, MagnifyingGlass,
   PencilSimple, SquaresFour, UploadSimple, X,
 } from "@phosphor-icons/react";
-import { RiOpenaiFill } from "react-icons/ri";
-import { SiAnthropic, SiBilibili, SiGooglegemini, SiYoutube } from "react-icons/si";
 import { MoveDialog } from "./components/BookmarkMenus";
 import { EditorDialog } from "./components/EditorDialog";
 import { FolderView, ResizeHandle } from "./components/FolderView";
@@ -17,6 +15,7 @@ import { allFolders, bookmarks, exportBookmarksHtml, getRootFolders, importBundl
 import { createBundle, defaultConfig, downloadText, loadConfig, parseBundle, saveConfig } from "./lib/config";
 import { createTranslator, resolveLanguage } from "./lib/i18n";
 import { prepareLocalImage } from "./lib/images";
+import { openBookmarkLink } from "./lib/navigation";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle, SearchEngine } from "./types";
 
 const engines: Record<SearchEngine, { label: string; action: string; host: string }> = {
@@ -37,6 +36,23 @@ function flattenBlocks(roots: BookmarkNode[]): BookmarkNode[] {
 
 function walkNodes(nodes: BookmarkNode[]): BookmarkNode[] {
   return nodes.flatMap((node) => [node, ...walkNodes(node.children || [])]);
+}
+
+type SearchableBookmark = { node: BookmarkNode; parent: BookmarkNode; index: number; title: string; host: string };
+
+function collectSearchableBookmarks(roots: BookmarkNode[]): SearchableBookmark[] {
+  const result: SearchableBookmark[] = [];
+  const visit = (parent: BookmarkNode) => {
+    (parent.children || []).forEach((node, index) => {
+      if (node.url) {
+        let host = node.url;
+        try { host = new URL(node.url).hostname.replace(/^www\./, ""); } catch { /* Keep the original URL for unusual Chrome bookmark schemes. */ }
+        result.push({ node, parent, index: node.index ?? index, title: parsePresentationTitle(node.title).title, host });
+      } else visit(node);
+    });
+  };
+  roots.forEach(visit);
+  return result;
 }
 
 function remapRecord<T>(record: Record<string, T> | undefined, idMap: Record<string, string>): Record<string, T> {
@@ -73,11 +89,11 @@ function portablePresentationTitle(node: BookmarkNode, config: AppConfig): strin
 }
 
 const quickLinks = [
-  { title: "ChatGPT", subtitle: "OpenAI", url: "https://chatgpt.com", color: "#111111", icon: RiOpenaiFill },
-  { title: "Claude", subtitle: "Anthropic", url: "https://claude.ai", color: "#d97757", icon: SiAnthropic },
-  { title: "Gemini", subtitle: "Google AI", url: "https://gemini.google.com", color: "#4285f4", icon: SiGooglegemini },
-  { title: "YouTube", subtitle: "视频", url: "https://youtube.com", color: "#ff0033", icon: SiYoutube },
-  { title: "Bilibili", subtitle: "哔哩哔哩", url: "https://bilibili.com", color: "#00aeec", icon: SiBilibili },
+  { title: "ChatGPT", url: "https://chatgpt.com" },
+  { title: "Claude", url: "https://claude.ai" },
+  { title: "Gemini", url: "https://gemini.google.com" },
+  { title: "YouTube", url: "https://youtube.com" },
+  { title: "Bilibili", url: "https://bilibili.com" },
 ];
 
 function isLikelyUrl(value: string) {
@@ -106,6 +122,7 @@ export function App() {
   const [supportOpen, setSupportOpen] = useState(false);
   const [editor, setEditor] = useState<EditorValue | null>(null);
   const [query, setQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [engineMenu, setEngineMenu] = useState(false);
   const [toast, setToast] = useState("");
   const [undoAction, setUndoAction] = useState<null | (() => Promise<void>)>(null);
@@ -234,6 +251,15 @@ export function App() {
       if (ai < 0 && bi < 0) return 0; if (ai < 0) return 1; if (bi < 0) return -1; return ai - bi;
     });
   }, [rawBlocks, config.folderOrder]);
+  const searchableBookmarks = useMemo(() => collectSearchableBookmarks(visibleRoots), [visibleRoots]);
+  const bookmarkMatches = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle || isLikelyUrl(needle)) return [];
+    return searchableBookmarks
+      .filter((item) => `${item.title}\n${item.node.url || ""}`.toLocaleLowerCase().includes(needle))
+      .sort((a, b) => Number(b.title.toLocaleLowerCase().startsWith(needle)) - Number(a.title.toLocaleLowerCase().startsWith(needle)))
+      .slice(0, 6);
+  }, [query, searchableBookmarks]);
   useEffect(() => {
     if (!editing) { setSelectedBlock(null); return; }
     if (!selectedBlock || !blocks.some((block) => block.id === selectedBlock)) setSelectedBlock(blocks[0]?.id || null);
@@ -407,10 +433,14 @@ export function App() {
         <span className="brand__copy">{editing ? <><input aria-label={t("app.brandName")} value={config.brandName} onChange={(event) => onConfig((value) => ({ ...value, brandName: event.target.value }))} placeholder={t("app.brandName")} /><input aria-label={t("app.brandTagline")} value={config.brandTagline} onChange={(event) => onConfig((value) => ({ ...value, brandTagline: event.target.value }))} placeholder={t("app.taglinePlaceholder")} /></> : <><strong>{config.brandName}</strong><small>{config.brandTagline}</small></>}</span>
         {editing && <span className="brand__tools"><button type="button" className="icon-button" title={t("app.replaceLogo")} aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><UploadSimple /></button><button type="button" className="icon-button danger" title={t("app.deleteLogo")} aria-label={t("app.deleteLogo")} onClick={() => onConfig((value) => ({ ...value, brandLogo: "" }))}><X /></button><input ref={brandLogoInput} hidden type="file" accept="image/*" onChange={pickBrandLogo} /></span>}
       </div>
-      <form className="search" onSubmit={search}>
+      <form className="search" onSubmit={search} onFocusCapture={() => setSearchFocused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}>
         <div ref={enginePicker} className="engine-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setEngineMenu(false); }}><button ref={engineButton} type="button" aria-label={t("app.searchPicker", { engine: engineLabel(config.searchEngine) })} aria-expanded={engineMenu} aria-haspopup="menu" onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openEngineMenu("selected"); } else if (event.key === "ArrowUp") { event.preventDefault(); openEngineMenu("last"); } }} onClick={() => setEngineMenu(!engineMenu)}><Browsers weight="duotone" /><span>{engineLabel(config.searchEngine)}</span><CaretDown /></button>{engineMenu && <div className="engine-menu" role="menu" aria-label={t("app.searchEngines")}>{engineIds.map((id, index) => <button ref={(element) => { engineOptions.current[index] = element; }} type="button" role="menuitemradio" aria-checked={config.searchEngine === id} key={id} className={config.searchEngine === id ? "active" : ""} onKeyDown={(event) => moveEngineFocus(event, index)} onClick={() => { onConfig((value) => ({ ...value, searchEngine: id })); setEngineMenu(false); requestAnimationFrame(() => engineButton.current?.focus()); }}>{engineLabel(id)}<small>{engines[id].host}</small></button>)}</div>}</div>
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("app.searchPlaceholder", { engine: engineLabel(config.searchEngine) })} aria-label={t("app.search")} />
+        <input value={query} onChange={(event) => { setQuery(event.target.value); setSearchFocused(true); }} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setSearchFocused(false); } }} placeholder={t("app.searchPlaceholder", { engine: engineLabel(config.searchEngine) })} aria-label={t("app.search")} />
         <button className="search__submit" aria-label={t("app.search")}><MagnifyingGlass weight="bold" /></button>
+        {searchFocused && query.trim() && !engineMenu && <div className="bookmark-search-results" role="region" aria-label={t("app.bookmarkMatches")}>
+          <header><span>{t("app.bookmarkMatches")}</span><small aria-live="polite">{t("app.bookmarkMatchCount", { count: bookmarkMatches.length })}</small></header>
+          {bookmarkMatches.length > 0 ? bookmarkMatches.map((item) => <a key={item.node.id} href={item.node.url} onClick={(event) => { setSearchFocused(false); void openBookmarkLink(event, item.node.url, () => moveRecentBookmarkToFront(item.node, item.parent, item.index)); }}><BookmarkSimple weight="duotone" /><span><strong>{item.title}</strong><small>{item.host}</small></span></a>) : <p>{t("app.noBookmarkMatches")}</p>}
+        </div>}
       </form>
       <div className="topbar__actions">{editing && <span className={`sync-status ${native ? "is-native" : ""}`} title={t(native ? "app.chromeNative" : "app.webDemo")}><ArrowsClockwise weight="bold" />{t(native ? "app.chromeConnected" : "app.demoData")}</span>}{!editing && <button className="icon-button edit-entry" aria-label={t("app.editHome")} title={t("app.editHome")} onClick={() => setEditing(true)}><PencilSimple /><span className="sr-only">{t("app.editHome")}</span></button>}{editing && <button className="button button--primary" onClick={() => { setEditing(false); setSettings(false); }}><Check weight="bold" />{t("app.done")}</button>}</div>
     </header>

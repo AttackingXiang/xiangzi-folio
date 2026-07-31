@@ -15,6 +15,25 @@ describe("Xiangzi Folio app", () => {
     expect(await screen.findByText("霞鹜文楷")).toBeInTheDocument();
   });
 
+  it("finds visible Chrome bookmarks from the main search field", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = await screen.findByRole("textbox", { name: "搜索" });
+    await user.type(search, "MDN");
+    const results = screen.getByRole("region", { name: "匹配的书签" });
+    expect(within(results).getByRole("link", { name: /MDN Web Docs/ })).toHaveAttribute("href", "https://developer.mozilla.org");
+    expect(within(results).getByText("1 个")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "匹配的书签" })).not.toBeInTheDocument();
+  });
+
+  it("keeps default quick-access tiles readable across responsive layouts", async () => {
+    render(<App />);
+    const quickBookmark = await screen.findByTestId("quick-bookmark-91");
+    expect(quickBookmark).toHaveAttribute("data-quick-span", "2");
+    expect(quickBookmark).toHaveStyle({ "--quick-mobile-span": "5" });
+  });
+
   it("keeps child folders grouped when a parent uses the icon grid style", async () => {
     localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...defaultConfig, folderStyles: { ...defaultConfig.folderStyles, "110": "icons" } }));
     render(<App />);

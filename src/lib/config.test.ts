@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultConfig, parseBundle, sanitizeConfig } from "./config";
 
 it("uses Nordic Dawn as the first-run appearance default", () => {
-  expect(defaultConfig).toMatchObject({ theme: "nordic", accent: "#5e88a5", glassStrength: 14, backgroundShade: 0 });
+  expect(defaultConfig).toMatchObject({ theme: "nordic", accent: "#5e88a5", glassStrength: 14, backgroundShade: 0, recentClickToFront: true });
 });
 
 describe("configuration validation", () => {
@@ -48,7 +48,9 @@ describe("configuration validation", () => {
   });
 
   it("rejects duplicate IDs and malformed folder contents before import", () => {
-    expect(() => parseBundle({ kind: "xiangzi-folio", config: defaultConfig, bookmarkTree: [{ id: "same", title: "A" }, { id: "same", title: "B" }] })).toThrow(/重复/);
+    expect(() => parseBundle({ kind: "xiangzi-folio", config: defaultConfig, bookmarkTree: [{ id: "same", title: "A", url: "https://a.example" }, { id: "same", title: "B", url: "https://b.example" }] })).toThrow(/重复/);
     expect(() => parseBundle({ kind: "xiangzi-folio", config: defaultConfig, bookmarkTree: [{ id: "a", title: "A", children: {} }] })).toThrow(/文件夹内容/);
+    expect(() => parseBundle({ kind: "xiangzi-folio", config: defaultConfig, bookmarkTree: [{ id: "a", title: "A", url: "https://example.com", children: [] }] })).toThrow(/书签或文件夹/);
+    expect(() => parseBundle({ kind: "xiangzi-folio", config: defaultConfig, bookmarkTree: [{ id: "a", title: "A" }] })).toThrow(/书签或文件夹/);
   });
 });

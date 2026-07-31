@@ -38,7 +38,7 @@ export const defaultConfig: AppConfig = {
   markerStorageVersion: 3,
   quickLinksSeeded: false,
   showSecondaryRoots: false,
-  recentClickToFront: false,
+  recentClickToFront: true,
   brandName: "Xiangzi",
   brandTagline: "FOLIO",
   brandLogo: "",
@@ -160,12 +160,15 @@ export function parseBundle(value: unknown): ExportBundle {
       if (nodeCount > maxImportedNodes) throw new Error(`备份最多支持 ${maxImportedNodes} 个节点`);
       if (entry.url !== undefined && typeof entry.url !== "string") throw new Error("备份包含无效的网址");
       if (entry.children !== undefined && !Array.isArray(entry.children)) throw new Error("备份包含无效的文件夹内容");
+      const isBookmark = typeof entry.url === "string" && entry.url.length > 0;
+      const isFolder = Array.isArray(entry.children);
+      if (isBookmark === isFolder) throw new Error("备份节点必须是书签或文件夹，不能同时属于两者");
       return {
         id: entry.id,
         ...(typeof entry.parentId === "string" ? { parentId: entry.parentId } : {}),
         ...(typeof entry.index === "number" && Number.isInteger(entry.index) && entry.index >= 0 ? { index: entry.index } : {}),
         title: entry.title.slice(0, 10_000),
-        ...(typeof entry.url === "string" ? { url: entry.url.slice(0, 100_000) } : {}),
+        ...(isBookmark ? { url: (entry.url as string).slice(0, 100_000) } : {}),
         ...(Array.isArray(entry.children) ? { children: parseNodes(entry.children, depth + 1) } : {}),
       };
     });

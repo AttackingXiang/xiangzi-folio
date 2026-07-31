@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, ArrowsLeftRight, Folder, MagnifyingGlass, X,
 } from "@phosphor-icons/react";
@@ -37,6 +37,9 @@ export function MoveDialog({ node, roots, language, onClose, onMove }: {
   const blocked = useMemo(() => node && !node.url ? descendants(node) : new Set<string>(), [node]);
   const folders = useMemo(() => folderOptions(roots, t("common.root")).filter((item) => !blocked.has(item.node.id)), [roots, blocked, t]);
   useDialogFocus(!!node, dialogRef, onClose);
+  // Each open targets a different node; a leftover search term from the
+  // previous move would otherwise keep filtering the destination list.
+  useEffect(() => { setQuery(""); setMoving(""); }, [node?.id]);
   if (!node) return null;
   const visible = folders.filter((item) => item.path.toLowerCase().includes(query.trim().toLowerCase()));
   const choose = async (id: string) => { setMoving(id); try { await onMove(id); onClose(); } finally { setMoving(""); } };

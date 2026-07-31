@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { FolderOpen, FolderPlus, LinkSimple, PencilSimple, SlidersHorizontal, Star, Trash } from "@phosphor-icons/react";
 import { parsePresentationTitle } from "../lib/bookmarks";
+import { favicon } from "../lib/favicon";
 import { createTranslator } from "../lib/i18n";
+import { openBookmarkLink } from "../lib/navigation";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle } from "../types";
 
 type BookmarkDefaults = Pick<EditorValue, "style" | "width" | "rows">;
@@ -19,7 +21,7 @@ type Props = {
   onDelete: (node: BookmarkNode, parentId: string, index: number) => void;
   onNewBookmark: (parentId: string, defaults: BookmarkDefaults) => void;
   onNewFolder: (parentId: string) => void;
-  onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => void;
+  onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => Promise<void>;
   onReorder: (id: string, parentId: string, index: number, title: string) => Promise<void>;
   onMoveInto: (id: string, parentId: string, folderTitle: string) => Promise<void>;
 };
@@ -39,20 +41,16 @@ function isQuickBookmarkDrag(event: DragEvent) {
   return Array.from(event.dataTransfer.types || []).includes(quickDragMime) || !!event.dataTransfer.getData(quickDragMime);
 }
 
-function favicon(url: string) {
-  if (typeof chrome !== "undefined" && chrome.runtime?.id) return chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(url)}&size=64`);
-  return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(url)}&sz=128`;
-}
-
-function presentationFor(node: BookmarkNode, config: AppConfig): BookmarkDefaults & { span: number } {
+function presentationFor(node: BookmarkNode, config: AppConfig): BookmarkDefaults & { span: number; mobileSpan: number } {
   const parsed = parsePresentationTitle(node.title);
   const titleStyle = bookmarkStyles.includes(parsed.marker as BookmarkStyle) ? parsed.marker as BookmarkStyle : undefined;
   const style = config.markerStorageVersion >= 3 ? titleStyle || config.bookmarkStyles[node.id] || "tile" : config.bookmarkStyles[node.id] || titleStyle || "tile";
   const width = (config.markerStorageVersion >= 3 ? parsed.width || config.bookmarkWidths[node.id] : config.bookmarkWidths[node.id] || parsed.width) || (style === "tile" ? 1.5 : style === "featured" ? 8 : style === "dock" ? 3 : 4);
   const rows = (config.markerStorageVersion >= 3 ? parsed.rows || config.bookmarkRows[node.id] : config.bookmarkRows[node.id] || parsed.rows) || 1;
-  const defaultSpan = style === "featured" ? 4 : style === "dock" ? 3 : style === "row" ? 2 : 1;
-  const scaled = style === "tile" ? Math.round(width / 1.5) : Math.round(width / 2);
-  return { style, width, rows, span: Math.min(6, Math.max(defaultSpan, scaled || defaultSpan)) };
+  const defaultSpan = style === "featured" ? 4 : style === "dock" ? 3 : 2;
+  const scaled = style === "tile" ? Math.round(width / 1.5) * 2 : Math.round(width / 2);
+  const span = Math.min(10, Math.max(defaultSpan, scaled || defaultSpan));
+  return { style, width, rows, span, mobileSpan: span >= 4 ? 10 : 5 };
 }
 
 function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, onMove, onDelete, onRecentClick, onDragStart, onDragEnd }: Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDelete" | "onRecentClick"> & { node: BookmarkNode; parent: BookmarkNode; index: number; preview: QuickDropPreview | null; onDragStart: (event: DragEvent, item: QuickDragItem) => void; onDragEnd: () => void }) {
@@ -65,10 +63,10 @@ function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, 
   const item = { id: node.id, parentId: parent.id, index, title };
   return <Fragment>
     {preview?.targetId === node.id && <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties}>{t("common.dropHere")}</div>}
-    <article className={`quick-access__item quick-access__item--${presentation.style} ${presentation.rows === 2 ? "is-tall" : ""} ${editing ? "is-editing" : ""} ${preview?.targetId === node.id ? "is-drop-target" : ""}`} style={{ "--quick-span": presentation.span } as CSSProperties} data-testid={`quick-bookmark-${node.id}`} data-quick-bookmark-id={node.id} data-quick-parent-id={parent.id} data-quick-bookmark-index={index} data-quick-bookmark-title={title} data-quick-span={presentation.span} draggable={editing} onDragStart={(event) => onDragStart(event, item)} onDragEnd={onDragEnd}>
+    <article className={`quick-access__item quick-access__item--${presentation.style} ${presentation.rows === 2 ? "is-tall" : ""} ${editing ? "is-editing" : ""} ${preview?.targetId === node.id ? "is-drop-target" : ""}`} style={{ "--quick-span": presentation.span, "--quick-mobile-span": presentation.mobileSpan } as CSSProperties} data-testid={`quick-bookmark-${node.id}`} data-quick-bookmark-id={node.id} data-quick-parent-id={parent.id} data-quick-bookmark-index={index} data-quick-bookmark-title={title} data-quick-span={presentation.span} draggable={editing} onDragStart={(event) => onDragStart(event, item)} onDragEnd={onDragEnd}>
       {editing && <span className="quick-access__drag" aria-hidden="true">⋮⋮</span>}
-      <a href={node.url} title={`${title}\n${node.url}`} onClick={(event) => { if (editing) event.preventDefault(); else onRecentClick(node, parent, index); }}>
-        <span className="quick-access__icon" aria-hidden="true">{!broken && node.url ? <img src={favicon(node.url)} alt="" onError={() => setBroken(true)} /> : <span>{title.slice(0, 1).toUpperCase()}</span>}</span>
+      <a href={node.url} title={`${title}\n${node.url}`} onClick={(event) => { if (editing) { event.preventDefault(); return; } void openBookmarkLink(event, node.url, () => onRecentClick(node, parent, index)); }}>
+        <span className="quick-access__icon" aria-hidden="true">{!broken && node.url ? <img src={favicon(node.url, 64)} alt="" onError={() => setBroken(true)} /> : <span>{title.slice(0, 1).toUpperCase()}</span>}</span>
         <span><strong>{title}</strong><small>{host}</small></span>
       </a>
       {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={t("action.editBookmark", { title })} title={t("editor.edit") + t("editor.bookmark")} onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveBookmark", { title })} title={t("move.bookmark")} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteBookmark", { title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
