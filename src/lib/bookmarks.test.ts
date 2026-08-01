@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countLinks, exportBookmarksHtml, isQuickAccessFolder, normalizeUrl, parseBookmarksHtml, parsePresentationTitle, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./bookmarks";
+import { countLinks, exportBookmarksHtml, folderStyleOptions, isQuickAccessFolder, normalizeUrl, parseBookmarksHtml, parsePresentationTitle, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./bookmarks";
 import type { BookmarkStyle, FolderStyle } from "../types";
 import { demoTree } from "../data/demo";
 
@@ -78,5 +78,30 @@ describe("bookmark utilities", () => {
     expect(isQuickAccessFolder(chinese)).toBe(true);
     expect(isQuickAccessFolder(english)).toBe(true);
     expect(isQuickAccessFolder({ id: "q3", title: "常用入口", children: [] })).toBe(false);
+  });
+
+  it("gives the new cards style and pinned+style combinations their own reversible markers without colliding with the original 98", () => {
+    const legacyMarkers = new Set<string>();
+    for (const style of ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as FolderStyle[]) {
+      for (const width of [undefined, 3, 4, 6, 8, 9, 12]) for (const collapsed of [false, true]) legacyMarkers.add(setFolderPresentationTitle("x", { style, width, collapsed }).slice(-3));
+    }
+
+    const cardsTitle = setFolderPresentationTitle("素材", { style: "cards" });
+    expect(parsePresentationTitle(cardsTitle)).toEqual({ title: "素材", marker: "cards" });
+    expect(legacyMarkers.has(cardsTitle.slice(-3))).toBe(false);
+
+    const newMarkers = new Set<string>([cardsTitle.slice(-3)]);
+    for (const style of folderStyleOptions) {
+      const title = setFolderPresentationTitle("常用", { style, pinned: true });
+      expect(parsePresentationTitle(title)).toEqual({ title: "常用", marker: style, role: "quick-access" });
+      expect(legacyMarkers.has(title.slice(-3))).toBe(false);
+      newMarkers.add(title.slice(-3));
+    }
+    // cards (unpinned) + one marker per pinned style, all distinct from each other and from the legacy 98.
+    expect(newMarkers.size).toBe(1 + folderStyleOptions.length);
+
+    // The legacy bare-pin sentinel (written by setQuickAccessTitle before this
+    // feature existed) must keep decoding exactly as before: role only, no marker.
+    expect(parsePresentationTitle(setQuickAccessTitle("常用入口"))).toEqual({ title: "常用入口", role: "quick-access" });
   });
 });

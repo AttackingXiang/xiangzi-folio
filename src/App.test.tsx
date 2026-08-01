@@ -32,6 +32,7 @@ describe("Xiangzi Folio app", () => {
     const quickBookmark = await screen.findByTestId("quick-bookmark-91");
     expect(quickBookmark).toHaveAttribute("data-quick-span", "2");
     expect(quickBookmark).toHaveStyle({ "--quick-mobile-span": "5" });
+    expect(screen.getByRole("region", { name: "常用入口" })).toHaveClass("is-transparent");
   });
 
   it("keeps child folders grouped when a parent uses the icon grid style", async () => {
@@ -115,6 +116,26 @@ describe("Xiangzi Folio app", () => {
     await user.click(screen.getByRole("button", { name: "编辑主页" }));
     await user.click(screen.getByRole("button", { name: "显示其他书签" }));
     expect(await screen.findByTestId("bookmark-201")).toBeInTheDocument();
+  });
+
+  it("renders ungrouped bookmarks with the same card style as quick access by default", async () => {
+    render(<App />);
+    await screen.findByText("快捷书签");
+    const bookmark = screen.getByTestId("bookmark-101");
+    expect(bookmark.closest(".cards-grid")).not.toBeNull();
+    expect(bookmark).toHaveClass("bookmark--card");
+  });
+
+  it("lets an ordinary folder switch to the quick-access shelf, and lets the shelf switch to a plain style", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(bookmarks, "update").mockImplementation(async (id, changes) => ({ id, title: changes.title || "", children: [] }));
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    // Switch the pinned quick-access shelf away from its default card style.
+    const quickHeader = document.querySelector(".quick-access__style") as HTMLElement;
+    await user.click(within(quickHeader).getByRole("button", { name: "设置显示样式" }));
+    await user.click(within(quickHeader).getByRole("menuitemradio", { name: "完整目录" }));
+    await waitFor(() => expect(bookmarks.update).toHaveBeenCalledWith("90", { title: setFolderPresentationTitle("常用入口", { style: "directory", pinned: true }) }));
   });
 
   it("switches search engines from the picker", async () => {
@@ -299,6 +320,33 @@ describe("Xiangzi Folio app", () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").language).toBe("en"));
   });
 
+  it("toggles the global folder background from appearance settings", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    await user.click(screen.getByRole("button", { name: "外观" }));
+    const toggle = screen.getByRole("switch", { name: "显示文件夹背景" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(document.querySelector(".app")).toHaveAttribute("data-folder-background", "off");
+    expect(document.querySelector(".app")).toHaveAttribute("data-folder-border", "on");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").showFolderBackground).toBe(false));
+  });
+
+  it("toggles the global folder border from appearance settings", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    await user.click(screen.getByRole("button", { name: "外观" }));
+    const toggle = screen.getByRole("switch", { name: "显示文件夹框线" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(document.querySelector(".app")).toHaveAttribute("data-folder-border", "off");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").showFolderBorder).toBe(false));
+  });
+
   it("opens voluntary developer support options from the footer", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -447,16 +495,36 @@ describe("Xiangzi Folio app", () => {
     expect(edit).not.toBeNull();
     await user.click(edit!);
     await user.click(screen.getByRole("button", { name: "图标" }));
-    await user.selectOptions(screen.getByLabelText("占用宽度"), "6");
+    await user.selectOptions(screen.getByLabelText("占用宽度"), "4");
     await user.selectOptions(screen.getByLabelText("卡片高度"), "2");
     await user.click(screen.getByRole("button", { name: "保存并同步" }));
-    await waitFor(() => expect(update).toHaveBeenCalledWith("101", { title: setBookmarkPresentationTitle("Figma", { style: "tile", width: 6, rows: 2 }), url: "https://figma.com" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith("101", { title: setBookmarkPresentationTitle("Figma", { style: "tile", width: 4, rows: 2 }), url: "https://figma.com" }));
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}");
       expect(saved.bookmarkStyles["101"]).toBe("tile");
-      expect(saved.bookmarkWidths["101"]).toBe(6);
+      expect(saved.bookmarkWidths["101"]).toBe(4);
       expect(saved.bookmarkRows["101"]).toBe(2);
     });
+  });
+
+  it("shows proportional card-width options instead of full-page columns when editing a card-grid bookmark", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    // bookmark-101 (Figma) lives in the ungrouped "快捷书签" block, which defaults to the cards style.
+    const edit = document.querySelector<HTMLButtonElement>('[data-testid="bookmark-101"] button[title="编辑书签"]');
+    await user.click(edit!);
+    const widthSelect = screen.getByLabelText("占用宽度");
+    const optionLabels = Array.from(widthSelect.querySelectorAll("option")).map((option) => option.textContent);
+    expect(optionLabels).not.toContain("整行");
+    expect(optionLabels).toContain("最宽");
+
+    // quick-access bookmarks (a different grid, but the same card semantics) get the same treatment.
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    const quickEdit = await screen.findByTestId("quick-bookmark-91");
+    await user.click(within(quickEdit).getByRole("button", { name: "编辑书签 ChatGPT" }));
+    const quickWidthLabels = Array.from(screen.getByLabelText("占用宽度").querySelectorAll("option")).map((option) => option.textContent);
+    expect(quickWidthLabels).not.toContain("整行");
   });
 
   it("uses a 1.5-column icon default for new bookmarks inside icon folders", async () => {
@@ -480,6 +548,17 @@ describe("Xiangzi Folio app", () => {
     expect(await screen.findByText("“Figma”已删除")).toBeInTheDocument();
   });
 
+  it("requires confirmation before deleting a bookmark", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const remove = vi.spyOn(bookmarks, "remove").mockResolvedValue();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    await user.click(screen.getByRole("button", { name: "删除书签 Figma" }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("删除书签"));
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("sets a nested folder to half width inside its parent grid", async () => {
     const user = userEvent.setup();
     const update = vi.spyOn(bookmarks, "update").mockImplementation(async (id, changes) => ({ id, title: changes.title || "字体与排版", children: [] }));
@@ -494,6 +573,51 @@ describe("Xiangzi Folio app", () => {
     await user.click(half!);
     await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").folderWidths?.["113"]).toBe(6));
     await waitFor(() => expect(update).toHaveBeenCalledWith("113", { title: setFolderPresentationTitle("字体与排版", { style: "icons", width: 6, collapsed: false }) }));
+  });
+
+  it("toggles a transparent background on an individual folder frame", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="110"]')!;
+    const trigger = folder.querySelector<HTMLButtonElement>(':scope > .folder__header button[title="设置显示样式"]');
+    expect(trigger).not.toBeNull();
+    await user.click(trigger!);
+    const transparent = within(folder).getByRole("menuitemcheckbox", { name: "透明背景" });
+    await user.click(transparent);
+    await waitFor(() => expect(folder).toHaveClass("is-transparent"));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").folderTransparent?.["110"]).toBe(true));
+    await user.click(folder.querySelector<HTMLButtonElement>(':scope > .folder__header button[title="设置显示样式"]')!);
+    await user.click(within(folder).getByRole("menuitemcheckbox", { name: "显示卡片背景" }));
+    await waitFor(() => expect(folder).not.toHaveClass("is-transparent"));
+  });
+
+  it("opens and applies display settings on a nested folder", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="113"]')!;
+    const trigger = folder.querySelector<HTMLButtonElement>(":scope > .folder__header .folder__style-trigger")!;
+    await user.click(trigger);
+    expect(within(folder).getByRole("menu")).toBeInTheDocument();
+    await user.click(within(folder).getByRole("menuitemcheckbox", { name: "透明背景" }));
+    await waitFor(() => expect(folder).toHaveClass("is-transparent"));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").folderTransparent?.["113"]).toBe(true));
+  });
+
+  it("hides the border on an individual nested folder", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="113"]')!;
+    const trigger = folder.querySelector<HTMLButtonElement>(":scope > .folder__header .folder__style-trigger")!;
+    await user.click(trigger);
+    await user.click(within(folder).getByRole("menuitemcheckbox", { name: "隐藏框线" }));
+    await waitFor(() => expect(folder).toHaveClass("is-borderless"));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").folderBorderless?.["113"]).toBe(true));
+    await user.click(folder.querySelector<HTMLButtonElement>(":scope > .folder__header .folder__style-trigger")!);
+    await user.click(within(folder).getByRole("menuitemcheckbox", { name: "显示框线" }));
+    await waitFor(() => expect(folder).not.toHaveClass("is-borderless"));
   });
 
   it("uses four page columns for a collapsed nested folder and restores width on expand", async () => {

@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
-import { FolderOpen, FolderPlus, LinkSimple, PencilSimple, SlidersHorizontal, Star, Trash } from "@phosphor-icons/react";
+import { DotsThree, FolderOpen, FolderPlus, LinkSimple, PencilSimple, SlidersHorizontal, Star, Trash } from "@phosphor-icons/react";
 import { parsePresentationTitle } from "../lib/bookmarks";
 import { favicon } from "../lib/favicon";
+import { stylesList } from "./FolderView";
 import { createTranslator } from "../lib/i18n";
 import { openBookmarkLink } from "../lib/navigation";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle } from "../types";
@@ -14,6 +15,7 @@ type QuickDropSlot = Omit<QuickDropPreview, "id" | "parentId" | "index" | "title
 type Props = {
   folder: BookmarkNode;
   config: AppConfig;
+  onConfig: (recipe: (value: AppConfig) => AppConfig) => void;
   editing: boolean;
   onToggleAll: () => void;
   onEdit: (value: EditorValue) => void;
@@ -24,6 +26,8 @@ type Props = {
   onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => Promise<void>;
   onReorder: (id: string, parentId: string, index: number, title: string) => Promise<void>;
   onMoveInto: (id: string, parentId: string, folderTitle: string) => Promise<void>;
+  onStyle: (style: FolderStyle) => void;
+  onUnpin: () => void;
 };
 
 const quickBookmarkDefaults: BookmarkDefaults = { style: "tile", width: 1.5, rows: 1 };
@@ -69,7 +73,7 @@ function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, 
         <span className="quick-access__icon" aria-hidden="true">{!broken && node.url ? <img src={favicon(node.url, 64)} alt="" onError={() => setBroken(true)} /> : <span>{title.slice(0, 1).toUpperCase()}</span>}</span>
         <span><strong>{title}</strong><small>{host}</small></span>
       </a>
-      {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={t("action.editBookmark", { title })} title={t("editor.edit") + t("editor.bookmark")} onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveBookmark", { title })} title={t("move.bookmark")} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteBookmark", { title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
+      {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={t("action.editBookmark", { title })} title={t("editor.edit") + t("editor.bookmark")} onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows, cardsContext: true })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveBookmark", { title })} title={t("move.bookmark")} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteBookmark", { title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
     </article>
   </Fragment>;
 }
@@ -90,7 +94,7 @@ function QuickGrid({ parent, links, preview, onPreview, onDrop, ...props }: Grid
   return <div className="quick-access__grid" onDragEnter={(event) => onPreview(event, parent)} onDragOver={(event) => onPreview(event, parent)} onDrop={onDrop}>{links.map((node, index) => <QuickBookmark key={node.id} node={node} parent={parent} index={node.index ?? index} preview={preview} {...props} />)}{tail}</div>;
 }
 
-type GroupProps = Omit<Props, "folder" | "onToggleAll" | "onReorder"> & Pick<GridProps, "preview" | "onDragStart" | "onDragEnd" | "onPreview" | "onDrop"> & { folder: BookmarkNode; parent: BookmarkNode; depth: number };
+type GroupProps = Omit<Props, "folder" | "onToggleAll" | "onReorder" | "onStyle" | "onUnpin"> & Pick<GridProps, "preview" | "onDragStart" | "onDragEnd" | "onPreview" | "onDrop"> & { folder: BookmarkNode; parent: BookmarkNode; depth: number };
 
 function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragEnd, onPreview, onDrop, ...props }: GroupProps) {
   const [dropReady, setDropReady] = useState(false);
@@ -125,18 +129,26 @@ function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragE
     {dropReady && <div className="quick-folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title })}</small></div>}
     <header>
       <div><FolderOpen weight="fill" /><span>{title}</span><small>{links.length}</small></div>
-      {props.editing && <div className="quick-folder-group__actions"><button className="icon-button" type="button" aria-label={t("action.editFolder", { title })} title={t("action.editFolder", { title: "" }).trim()} onClick={() => props.onEdit({ id: folder.id, parentId: folder.parentId, type: "folder", title, url: "", folderStyle: "icons" as FolderStyle, width: 4 })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveFolder", { title })} title={t("move.folder")} onClick={() => props.onMove(folder)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newBookmarkIn", { title })} title={t("app.newBookmark")} onClick={() => props.onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newFolderIn", { title })} title={t("quick.newFolder")} onClick={() => props.onNewFolder(folder.id)}><FolderPlus /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteFolder", { title })} title={t("action.deleteFolder", { title: "" }).trim()} onClick={() => props.onDelete(folder, parentId, index)}><Trash /></button></div>}
+      {props.editing && <div className="quick-folder-group__actions"><button className="icon-button" type="button" aria-label={t("action.editFolder", { title })} title={t("action.editFolder", { title: "" }).trim()} onClick={() => props.onEdit({ id: folder.id, parentId: folder.parentId, type: "folder", title, url: "", folderStyle: "icons" as FolderStyle, width: 4, transparent: !!props.config.folderTransparent[folder.id], borderless: !!props.config.folderBorderless[folder.id] })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveFolder", { title })} title={t("move.folder")} onClick={() => props.onMove(folder)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newBookmarkIn", { title })} title={t("app.newBookmark")} onClick={() => props.onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple /></button><button className="icon-button" type="button" aria-label={t("action.newFolderIn", { title })} title={t("quick.newFolder")} onClick={() => props.onNewFolder(folder.id)}><FolderPlus /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteFolder", { title })} title={t("action.deleteFolder", { title: "" }).trim()} onClick={() => props.onDelete(folder, parentId, index)}><Trash /></button></div>}
     </header>
     {links.length > 0 && <QuickGrid parent={folder} links={links} preview={preview} onDragStart={onDragStart} onDragEnd={onDragEnd} onPreview={onPreview} onDrop={onDrop} {...props} />}
     {folders.map((child) => <QuickFolderGroup key={child.id} folder={child} parent={folder} depth={depth + 1} preview={preview} onDragStart={onDragStart} onDragEnd={onDragEnd} onPreview={onPreview} onDrop={onDrop} {...props} />)}
   </section>;
 }
 
-export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onReorder, onMoveInto }: Props) {
+export function QuickAccess({ folder, config, onConfig, editing, onToggleAll, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onReorder, onMoveInto, onStyle, onUnpin }: Props) {
   const t = createTranslator(config.language);
   const [dragItem, setDragItem] = useState<QuickDragItem | null>(null);
   const [preview, setPreview] = useState<QuickDropPreview | null>(null);
   const [rootDropReady, setRootDropReady] = useState(false);
+  const [styleMenu, setStyleMenu] = useState(false);
+  const styleMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!styleMenu) return;
+    const close = (event: PointerEvent) => { if (!styleMenuRef.current?.contains(event.target as Node)) setStyleMenu(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [styleMenu]);
   useEffect(() => {
     const clear = () => setRootDropReady(false);
     document.addEventListener("dragend", clear, true);
@@ -145,9 +157,16 @@ export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMo
   }, []);
   const slots = useRef<QuickDropSlot[]>([]);
   const children = folder.children || [];
+  // Quick Access is a shelf, not a regular folder card. Keep its outer frame
+  // transparent by default while still allowing an explicit false value to
+  // restore the shelf background from its style menu.
+  const transparent = config.folderTransparent[folder.id] !== false;
+  const borderless = !!config.folderBorderless[folder.id];
+  const toggleTransparent = () => onConfig((value) => ({ ...value, folderTransparent: { ...value.folderTransparent, [folder.id]: !transparent } }));
+  const toggleBorderless = () => onConfig((value) => ({ ...value, folderBorderless: { ...value.folderBorderless, [folder.id]: !borderless } }));
   const links = children.filter((child) => child.url);
   const folders = children.filter((child) => !child.url);
-  const shared = { config, editing, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onMoveInto };
+  const shared = { config, onConfig, editing, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onMoveInto };
   const onDragStart = (event: DragEvent, item: QuickDragItem) => {
     if (!editing) return;
     event.dataTransfer.effectAllowed = "move";
@@ -202,9 +221,9 @@ export function QuickAccess({ folder, config, editing, onToggleAll, onEdit, onMo
       await onMoveInto(item.id, folder.id, t("quick.title"));
     } catch { /* Invalid transfer data is ignored; source components own their drag payload. */ }
   };
-  return <section className={`quick-access ${rootDropReady ? "is-drop-ready" : ""}`} aria-label={t("quick.title")} onDragEnter={previewRootDrop} onDragOver={previewRootDrop} onDragLeave={(event) => { if (event.currentTarget === event.target) setRootDropReady(false); }} onDrop={dropIntoRoot}>
+  return <section className={`quick-access ${transparent ? "is-transparent" : ""} ${borderless ? "is-borderless" : ""} ${rootDropReady ? "is-drop-ready" : ""}`} aria-label={t("quick.title")} onDragEnter={previewRootDrop} onDragOver={previewRootDrop} onDragLeave={(event) => { if (event.currentTarget === event.target) setRootDropReady(false); }} onDrop={dropIntoRoot}>
     {rootDropReady && <div className="quick-folder-drop-overlay quick-access__drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title: t("quick.title") })}</small></div>}
-    <header><div><Star weight="fill" /><span>{t("quick.title")}</span></div><div className="quick-access__tools">{editing && <><button type="button" aria-label={t("quick.addBookmark")} onClick={() => onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple />{t("quick.newEntry")}</button><button type="button" aria-label={t("quick.addFolder")} onClick={() => onNewFolder(folder.id)}><FolderPlus />{t("quick.newFolder")}</button></>}<button type="button" onClick={onToggleAll}><SlidersHorizontal />{t("quick.toggleAll")}</button></div></header>
+    <header><div><Star weight="fill" /><span>{t("quick.title")}</span></div><div className="quick-access__tools">{editing && <><button type="button" aria-label={t("quick.addBookmark")} title={t("quick.addBookmark")} onClick={() => onNewBookmark(folder.id, quickBookmarkDefaults)}><LinkSimple />{t("quick.newEntry")}</button><button type="button" aria-label={t("quick.addFolder")} title={t("quick.addFolder")} onClick={() => onNewFolder(folder.id)}><FolderPlus />{t("quick.newFolder")}</button><div ref={styleMenuRef} className="quick-access__style"><button type="button" aria-label={t("action.style")} title={t("action.style")} aria-expanded={styleMenu} aria-haspopup="menu" onClick={() => setStyleMenu(!styleMenu)}><DotsThree weight="bold" /></button>{styleMenu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">{t("editor.appearance")}</small>{stylesList.map((item) => <button title={t(`folder.style.${item.id}`)} role="menuitemradio" aria-checked={item.id === "cards"} key={item.id} className={item.id === "cards" ? "active" : ""} onClick={() => { setStyleMenu(false); onStyle(item.id); }}><item.icon />{t(`folder.style.${item.id}`)}</button>)}<small role="presentation" className="style-menu__label">{t("folder.transparent")}</small><button title={t(transparent ? "folder.opaque" : "folder.transparent")} role="menuitemcheckbox" aria-checked={transparent} className={transparent ? "active" : ""} onClick={() => { toggleTransparent(); setStyleMenu(false); }}>{transparent ? t("folder.opaque") : t("folder.transparent")}</button><small role="presentation" className="style-menu__label">{t("folder.borderless")}</small><button title={t(borderless ? "folder.bordered" : "folder.borderless")} role="menuitemcheckbox" aria-checked={borderless} className={borderless ? "active" : ""} onClick={() => { toggleBorderless(); setStyleMenu(false); }}>{borderless ? t("folder.bordered") : t("folder.borderless")}</button><small role="presentation" className="style-menu__label">{t("folder.pin")}</small><button title={t("folder.unpin")} role="menuitemradio" aria-checked="true" className="active" onClick={() => { setStyleMenu(false); onUnpin(); }}><Star weight="fill" />{t("folder.unpin")}</button></div>}</div></>}<button type="button" title={t("quick.toggleAll")} onClick={onToggleAll}><SlidersHorizontal />{t("quick.toggleAll")}</button></div></header>
     {links.length > 0 && <QuickGrid parent={folder} links={links} preview={preview} onDragStart={onDragStart} onDragEnd={clearDrag} onPreview={onPreview} onDrop={onDrop} {...shared} />}
     {folders.map((child) => <QuickFolderGroup key={child.id} folder={child} parent={folder} depth={0} preview={preview} onDragStart={onDragStart} onDragEnd={clearDrag} onPreview={onPreview} onDrop={onDrop} {...shared} />)}
   </section>;

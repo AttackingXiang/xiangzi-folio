@@ -1,5 +1,5 @@
 import { demoTree } from "../data/demo";
-import type { BookmarkNode, BookmarkStyle, ExportBundle, FolderStyle } from "../types";
+import type { AppConfig, BookmarkNode, BookmarkStyle, ExportBundle, FolderStyle } from "../types";
 
 export type CreateInput = { parentId?: string; index?: number; title: string; url?: string };
 export type MoveInput = { parentId?: string; index?: number };
@@ -143,7 +143,16 @@ const shortMarkerVersion = 1;
 
 export type FolderRole = "quick-access";
 type ShortPresentation = { kind: "folder" | "bookmark"; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole };
-const quickAccessPayload = shortFolderStyles.length * shortFolderWidths.length * 2;
+// shortFolderStyles/shortFolderWidths are frozen: their combinatorial payload
+// formula (0..97) is already written into real users' bookmark titles, so the
+// array can never grow or reorder without corrupting existing saved styles.
+// "cards" and the pinned (quick-access) + style combination therefore live in
+// dedicated sentinel payloads just above that range instead of joining the
+// combinatorial grid.
+export const folderStyleOptions: FolderStyle[] = [...shortFolderStyles, "cards"];
+const quickAccessPayload = shortFolderStyles.length * shortFolderWidths.length * 2; // 98: legacy bare pin, no style recorded
+const cardsStylePayload = quickAccessPayload + 1; // 99: cards style, not pinned
+const pinnedStyleBase = cardsStylePayload + 1; // 100..107: pinned + folderStyleOptions[payload - pinnedStyleBase]
 
 function shortChecksum(payload: number, type: number, version: number) {
   return (payload ^ (payload >> 2) ^ (payload >> 5) ^ (type * 3) ^ version) & 3;
@@ -170,6 +179,10 @@ function decodeShortMarker(value: string): ShortPresentation | undefined {
   if (version !== shortMarkerVersion || checksum !== shortChecksum(payload, type, version)) return undefined;
   if (type === 0) {
     if (payload === quickAccessPayload) return { kind: "folder", role: "quick-access" };
+    if (payload === cardsStylePayload) return { kind: "folder", marker: "cards" };
+    if (payload >= pinnedStyleBase && payload < pinnedStyleBase + folderStyleOptions.length) {
+      return { kind: "folder", role: "quick-access", marker: folderStyleOptions[payload - pinnedStyleBase] };
+    }
     if (payload >= shortFolderStyles.length * shortFolderWidths.length * 2) return undefined;
     const styleIndex = payload % shortFolderStyles.length;
     const remainder = Math.floor(payload / shortFolderStyles.length);
@@ -255,12 +268,30 @@ export function setQuickAccessTitle(value: string): string {
   return `${parsePresentationTitle(value).title}${encodeShortMarker(quickAccessPayload, "folder")}`;
 }
 
-export function setFolderPresentationTitle(value: string, presentation: { style: FolderStyle; width?: number; collapsed?: boolean }) {
+// Pinned (quick-access) and "cards" folders always render at full block
+// width and are never individually collapsible, so those combinations drop
+// the width/collapsed dimensions and use dedicated sentinel payloads instead
+// of the width x collapsed x style combinatorial grid below.
+export function setFolderPresentationTitle(value: string, presentation: { style: FolderStyle; width?: number; collapsed?: boolean; pinned?: boolean }) {
+  const title = parsePresentationTitle(value).title;
+  if (presentation.pinned) {
+    const styleIndex = folderStyleOptions.indexOf(presentation.style);
+    if (styleIndex < 0) throw new Error("不支持的文件夹展示设置");
+    return `${title}${encodeShortMarker(pinnedStyleBase + styleIndex, "folder")}`;
+  }
+  if (presentation.style === "cards") return `${title}${encodeShortMarker(cardsStylePayload, "folder")}`;
   const styleIndex = shortFolderStyles.indexOf(presentation.style);
   const widthIndex = shortFolderWidths.indexOf(presentation.width as PresentationWidth | undefined);
   if (styleIndex < 0 || widthIndex < 0) throw new Error("不支持的文件夹展示设置");
   const payload = ((presentation.collapsed ? 1 : 0) * shortFolderWidths.length + widthIndex) * shortFolderStyles.length + styleIndex;
-  return `${parsePresentationTitle(value).title}${encodeShortMarker(payload, "folder")}`;
+  return `${title}${encodeShortMarker(payload, "folder")}`;
+}
+
+export function resolveFolderStyle(node: BookmarkNode, config: AppConfig, block: boolean): FolderStyle {
+  const parsed = parsePresentationTitle(node.title);
+  const markerStyle = folderStyleOptions.includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : undefined;
+  const fallback: FolderStyle = parsed.role === "quick-access" ? "cards" : block ? "directory" : "icons";
+  return config.markerStorageVersion >= 3 ? markerStyle || config.folderStyles[node.id] || fallback : config.folderStyles[node.id] || markerStyle || fallback;
 }
 
 export function setBookmarkPresentationTitle(value: string, presentation: { style: BookmarkStyle; width?: number; rows?: 1 | 2 }) {

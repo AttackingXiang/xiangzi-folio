@@ -50,6 +50,11 @@ npm test
 npm run build
 ```
 
+设计资产与主题组合展示：
+
+- 文档：[docs/DESIGN_SYSTEM_SHOWCASE.md](docs/DESIGN_SYSTEM_SHOWCASE.md)
+- 本地页面：`http://127.0.0.1:4173/design-system`
+
 ## 数据与同步边界
 
 - **书签内容**：唯一真实来源是 Chrome 原生书签。Xiangzi Folio 不需要 Google OAuth。

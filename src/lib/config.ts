@@ -7,7 +7,7 @@ export const CONFIG_KEY = "xiangzi-folio.config.v1";
 export const CACHE_KEY = "xiangzi-folio.bookmarks.cache.v1";
 const LEGACY_CONFIG_KEY = "folio.config.v1";
 const LEGACY_CACHE_KEY = "folio.bookmarks.cache.v1";
-const folderStyleValues = new Set<FolderStyle>(["directory", "icons", "mixed", "dock", "stack", "focus", "columns"]);
+const folderStyleValues = new Set<FolderStyle>(["directory", "icons", "mixed", "dock", "stack", "focus", "columns", "cards"]);
 const bookmarkStyleValues = new Set<BookmarkStyle>(["row", "tile", "featured", "dock", "compact"]);
 const densityValues = new Set<Density>(["comfortable", "compact"]);
 const searchEngineValues = new Set<SearchEngine>(["google", "bing", "baidu", "duckduckgo"]);
@@ -26,10 +26,14 @@ export const defaultConfig: AppConfig = {
   glassStrength: 14,
   backgroundImage: "",
   backgroundShade: 0,
+  showFolderBackground: true,
+  showFolderBorder: true,
   searchEngine: "google",
   collapsed: [],
-  folderStyles: { "direct-all": "directory" },
+  folderStyles: { "direct-all": "cards" },
   folderWidths: { "direct-all": 4 },
+  folderTransparent: { "direct-all": true },
+  folderBorderless: {},
   bookmarkStyles: {},
   bookmarkWidths: {},
   bookmarkRows: {},
@@ -77,6 +81,8 @@ export function sanitizeConfig(value: unknown, base: AppConfig = defaultConfig, 
   const theme = typeof raw.theme === "string" && raw.theme in themePresetById ? raw.theme as ThemeMode : base.theme;
   const folderStyles = safeRecord(raw.folderStyles, (entry): entry is FolderStyle => typeof entry === "string" && folderStyleValues.has(entry as FolderStyle));
   const folderWidths = safeRecord(raw.folderWidths, (entry): entry is number => typeof entry === "number" && folderWidthValues.has(entry));
+  const folderTransparent = safeRecord(raw.folderTransparent, (entry): entry is boolean => typeof entry === "boolean");
+  const folderBorderless = safeRecord(raw.folderBorderless, (entry): entry is boolean => typeof entry === "boolean");
   const bookmarkStyles = safeRecord(raw.bookmarkStyles, (entry): entry is BookmarkStyle => typeof entry === "string" && bookmarkStyleValues.has(entry as BookmarkStyle));
   const bookmarkWidths = safeRecord(raw.bookmarkWidths, (entry): entry is number => typeof entry === "number" && bookmarkWidthValues.has(entry));
   const bookmarkRows = safeRecord(raw.bookmarkRows, (entry): entry is 1 | 2 => entry === 1 || entry === 2);
@@ -90,10 +96,14 @@ export function sanitizeConfig(value: unknown, base: AppConfig = defaultConfig, 
     glassStrength: clamp(raw.glassStrength, base.glassStrength, 0, 36),
     backgroundImage: safeLocalImage(raw.backgroundImage, base.backgroundImage, maxBackgroundLength),
     backgroundShade: clamp(raw.backgroundShade, base.backgroundShade, 0, 75),
+    showFolderBackground: safeBoolean(raw.showFolderBackground, base.showFolderBackground),
+    showFolderBorder: safeBoolean(raw.showFolderBorder, base.showFolderBorder),
     searchEngine: typeof raw.searchEngine === "string" && searchEngineValues.has(raw.searchEngine as SearchEngine) ? raw.searchEngine as SearchEngine : base.searchEngine,
     collapsed: safeStringList(raw.collapsed, base.collapsed),
     folderStyles: { ...base.folderStyles, ...folderStyles },
     folderWidths: { ...base.folderWidths, ...folderWidths },
+    folderTransparent: { ...base.folderTransparent, ...folderTransparent },
+    folderBorderless: { ...base.folderBorderless, ...folderBorderless },
     bookmarkStyles: { ...base.bookmarkStyles, ...bookmarkStyles },
     bookmarkWidths: { ...base.bookmarkWidths, ...bookmarkWidths },
     bookmarkRows: { ...base.bookmarkRows, ...bookmarkRows },

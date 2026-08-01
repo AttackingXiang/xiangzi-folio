@@ -16,6 +16,7 @@ describe("configuration validation", () => {
       backgroundImage: "https://example.com/tracker.png",
       folderOrder: ["one", 2, "one", "two"],
       folderStyles: { one: "icons", two: "invalid" },
+      folderTransparent: { one: true, two: "yes" },
       bookmarkWidths: { one: 1.5, two: 7 },
       accent: "red",
       brandName: 123,
@@ -29,6 +30,10 @@ describe("configuration validation", () => {
     expect(config.folderOrder).toEqual(["one", "two"]);
     expect(config.folderStyles.one).toBe("icons");
     expect(config.folderStyles.two).toBeUndefined();
+    expect(config.folderTransparent).toMatchObject({ "direct-all": true, one: true });
+    expect(config.showFolderBackground).toBe(true);
+    expect(config.showFolderBorder).toBe(true);
+    expect(defaultConfig.folderTransparent["direct-all"]).toBe(true);
     expect(config.bookmarkWidths).toEqual({ one: 1.5 });
     expect(config.accent).toBe(defaultConfig.accent);
     expect(config.brandName).toBe(defaultConfig.brandName);

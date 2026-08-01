@@ -11,7 +11,7 @@ import { QuickAccess } from "./components/QuickAccess";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SupportDialog } from "./components/SupportDialog";
 import { useBookmarks } from "./hooks/useBookmarks";
-import { allFolders, bookmarks, exportBookmarksHtml, getRootFolders, importBundle, importHtml, isQuickAccessFolder, parsePresentationTitle, restoreBookmarkBranch, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./lib/bookmarks";
+import { allFolders, bookmarks, exportBookmarksHtml, folderStyleOptions, getRootFolders, importBundle, importHtml, isQuickAccessFolder, parsePresentationTitle, resolveFolderStyle, restoreBookmarkBranch, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./lib/bookmarks";
 import { createBundle, defaultConfig, downloadText, loadConfig, parseBundle, saveConfig } from "./lib/config";
 import { createTranslator, resolveLanguage } from "./lib/i18n";
 import { prepareLocalImage } from "./lib/images";
@@ -31,7 +31,7 @@ const productMark = "/icons/brand-mark.png";
 function flattenBlocks(roots: BookmarkNode[]): BookmarkNode[] {
   const links = roots.flatMap((root) => (root.children || []).filter((item) => item.url));
   const direct = links.length ? { id: "direct-all", parentId: roots[0]?.id, title: "快捷书签", children: links } : null;
-  return [...(direct ? [direct] : []), ...roots.flatMap((root) => (root.children || []).filter((item) => !item.url && !isQuickAccessFolder(item) && parsePresentationTitle(item.title).title !== "常用入口"))];
+  return [...(direct ? [direct] : []), ...roots.flatMap((root) => (root.children || []).filter((item) => !item.url && !isQuickAccessFolder(item)))];
 }
 
 function walkNodes(nodes: BookmarkNode[]): BookmarkNode[] {
@@ -64,6 +64,8 @@ function remapConfigIds(config: AppConfig, idMap: Record<string, string>): AppCo
     ...config,
     folderStyles: remapRecord(config.folderStyles, idMap),
     folderWidths: remapRecord(config.folderWidths, idMap),
+    folderTransparent: remapRecord(config.folderTransparent, idMap),
+    folderBorderless: remapRecord(config.folderBorderless, idMap),
     bookmarkStyles: remapRecord(config.bookmarkStyles, idMap),
     bookmarkWidths: remapRecord(config.bookmarkWidths, idMap),
     bookmarkRows: remapRecord(config.bookmarkRows, idMap),
@@ -81,11 +83,11 @@ function portablePresentationTitle(node: BookmarkNode, config: AppConfig): strin
     const rows = config.bookmarkRows?.[node.id] || parsed.rows || 1;
     return style || width || rows === 2 ? setBookmarkPresentationTitle(node.title, { style: style || "row", width, rows }) : node.title;
   }
-  const parsedStyle = (["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as const).includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : undefined;
+  const parsedStyle = folderStyleOptions.includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : undefined;
   const style = config.folderStyles?.[node.id] || parsedStyle;
   const width = config.folderWidths?.[node.id] || parsed.width;
   const collapsed = config.collapsed?.includes(node.id) || !!parsed.collapsed;
-  return style || width || collapsed ? setFolderPresentationTitle(node.title, { style: style || "directory", width, collapsed }) : node.title;
+  return style || width || collapsed ? setFolderPresentationTitle(node.title, { style: style || "directory", width, collapsed, pinned: parsed.role === "quick-access" }) : node.title;
 }
 
 const quickLinks = [
@@ -135,6 +137,7 @@ export function App() {
   const engineButton = useRef<HTMLButtonElement>(null);
   const engineOptions = useRef<Array<HTMLButtonElement | null>>([]);
   const markerMigration = useRef(false);
+  const quickNameMigration = useRef(false);
   const quickSeed = useRef(false);
   const t = createTranslator(config.language);
   const engineLabel = (id: SearchEngine) => id === "baidu" ? t("engine.baidu") : engines[id].label;
@@ -219,11 +222,18 @@ export function App() {
     migrate();
   }, [config, configReady, refresh, roots]);
   const activeRoot = roots[0];
-  const quickFolder = useMemo(() => activeRoot ? allFolders([activeRoot]).find((folder) => isQuickAccessFolder(folder)) || allFolders([activeRoot]).find((folder) => parsePresentationTitle(folder.title).title === "常用入口") : undefined, [activeRoot]);
+  const quickFolder = useMemo(() => activeRoot ? allFolders([activeRoot]).find((folder) => isQuickAccessFolder(folder)) : undefined, [activeRoot]);
+  // One-time migration for pre-existing data: a folder literally named "常用
+  // 入口" but created before the role marker existed. Runs at most once per
+  // session (never re-checked after) so deliberately unpinning a folder that
+  // still happens to be named "常用入口" doesn't get silently re-pinned.
   useEffect(() => {
-    if (!quickFolder || isQuickAccessFolder(quickFolder)) return;
-    bookmarks.update(quickFolder.id, { title: setQuickAccessTitle(quickFolder.title) }).then(refresh).catch((reason) => setToast(reason instanceof Error ? reason.message : t("notice.quickSeedError")));
-  }, [quickFolder, refresh]);
+    if (quickNameMigration.current || !configReady || !activeRoot) return;
+    quickNameMigration.current = true;
+    const legacyMatch = allFolders([activeRoot]).find((folder) => !isQuickAccessFolder(folder) && parsePresentationTitle(folder.title).title === "常用入口");
+    if (!legacyMatch) return;
+    bookmarks.update(legacyMatch.id, { title: setQuickAccessTitle(legacyMatch.title) }).then(refresh).catch((reason) => setToast(reason instanceof Error ? reason.message : t("notice.quickSeedError")));
+  }, [configReady, activeRoot, refresh]);
   useEffect(() => {
     if (!native || !configReady || config.quickLinksSeeded || quickSeed.current || !activeRoot) return;
     quickSeed.current = true;
@@ -293,6 +303,8 @@ export function App() {
           ...bundle.config,
           folderStyles: remapRecord(bundle.config.folderStyles, idMap),
           folderWidths: remapRecord(bundle.config.folderWidths, idMap),
+          folderTransparent: remapRecord(bundle.config.folderTransparent, idMap),
+          folderBorderless: remapRecord(bundle.config.folderBorderless, idMap),
           bookmarkStyles: remapRecord(bundle.config.bookmarkStyles, idMap),
           bookmarkWidths: remapRecord(bundle.config.bookmarkWidths, idMap),
           bookmarkRows: remapRecord(bundle.config.bookmarkRows, idMap),
@@ -314,7 +326,7 @@ export function App() {
     onConfig((value) => ({ ...value, collapsed: allClosed ? value.collapsed.filter((id) => !ids.includes(id)) : [...new Set([...value.collapsed, ...ids])] }));
     await Promise.all(blocks.filter((block) => !block.id.startsWith("direct-")).map(async (block) => {
       const parsed = parsePresentationTitle(block.title);
-      const style = (["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as const).includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : config.folderStyles[block.id] || "directory";
+      const style = resolveFolderStyle(block, config, true);
       await bookmarks.update(block.id, { title: setFolderPresentationTitle(block.title, { style, width: parsed.width || config.folderWidths[block.id], collapsed: !allClosed }) });
     }));
     await refresh();
@@ -330,7 +342,7 @@ export function App() {
     onConfig((value) => ({ ...value, folderWidths: { ...value.folderWidths, [block.id]: width } }));
     if (!block.id.startsWith("direct-")) {
       const parsed = parsePresentationTitle(block.title);
-      const style = (["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as const).includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : config.folderStyles[block.id] || "directory";
+      const style = resolveFolderStyle(block, config, true);
       await bookmarks.update(block.id, { title: setFolderPresentationTitle(block.title, { style, width, collapsed: parsed.marker ? !!parsed.collapsed : config.collapsed.includes(block.id) }) });
       await refresh();
     }
@@ -341,8 +353,7 @@ export function App() {
     const previousTitles = blocks.filter((block) => !block.id.startsWith("direct-")).map((block) => ({ id: block.id, title: block.title }));
     onConfig((value) => ({ ...value, folderOrder: [], folderWidths: {}, collapsed: [] }));
     await Promise.all(previousTitles.map(async ({ id, title }) => {
-      const parsed = parsePresentationTitle(title);
-      const style = (["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as const).includes(parsed.marker as FolderStyle) ? parsed.marker as FolderStyle : config.folderStyles[id] || "directory";
+      const style = resolveFolderStyle({ id, title }, config, true);
       await bookmarks.update(id, { title: setFolderPresentationTitle(title, { style, collapsed: false }) });
     }));
     await refresh();
@@ -405,6 +416,18 @@ export function App() {
       await refresh(); notify(t("notice.movedInto", { title: folderTitle }));
     } catch (reason) { notify(reason instanceof Error ? reason.message : t("notice.quickMoveError")); }
   };
+  const pinFolder = async (node: BookmarkNode, pin: boolean, style?: FolderStyle) => {
+    try {
+      const nextStyle = style || resolveFolderStyle(node, config, true);
+      if (pin && quickFolder && quickFolder.id !== node.id) {
+        const prevStyle = resolveFolderStyle(quickFolder, config, true);
+        await bookmarks.update(quickFolder.id, { title: setFolderPresentationTitle(quickFolder.title, { style: prevStyle, pinned: false }) });
+      }
+      await bookmarks.update(node.id, { title: setFolderPresentationTitle(node.title, { style: nextStyle, pinned: pin }) });
+      await refresh();
+      notify(t(pin ? "notice.pinnedQuick" : "notice.unpinnedQuick", { title: parsePresentationTitle(node.title).title }));
+    } catch (reason) { notify(reason instanceof Error ? reason.message : t("notice.pinError")); }
+  };
   const engineIds = Object.keys(engines) as SearchEngine[];
   const focusEngineOption = (index: number) => requestAnimationFrame(() => engineOptions.current[index]?.focus());
   const openEngineMenu = (direction: "first" | "last" | "selected") => {
@@ -424,49 +447,52 @@ export function App() {
   };
   const appStyle = { "--user-accent": config.accent, "--glass-blur": `${config.glassStrength}px`, "--shade": `${config.backgroundShade / 100}` } as React.CSSProperties;
   const brandLogo = config.brandLogo || productMark;
+  const quickStyle = quickFolder ? resolveFolderStyle(quickFolder, config, true) : "cards";
 
-  return <div className="app" data-theme={config.theme} data-density={config.density} style={appStyle}>
+  return <div className="app" data-theme={config.theme} data-density={config.density} data-folder-background={config.showFolderBackground ? "on" : "off"} data-folder-border={config.showFolderBorder ? "on" : "off"} style={appStyle}>
     <div className={`app-background ${config.backgroundImage ? "has-image" : ""}`} style={config.backgroundImage ? { backgroundImage: `url(${config.backgroundImage})` } : undefined} />
     <header className="topbar glass-surface">
       <div className={`brand ${editing ? "brand--editing" : ""}`}>
-        {editing ? <button className="brand__mark" type="button" aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><img src={brandLogo} alt="" /></button> : <span className="brand__mark" aria-hidden="true"><img src={brandLogo} alt="" /></span>}
+        {editing ? <button className="brand__mark" type="button" aria-label={t("app.replaceLogo")} title={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><img src={brandLogo} alt="" /></button> : <span className="brand__mark" aria-hidden="true"><img src={brandLogo} alt="" /></span>}
         <span className="brand__copy">{editing ? <><input aria-label={t("app.brandName")} value={config.brandName} onChange={(event) => onConfig((value) => ({ ...value, brandName: event.target.value }))} placeholder={t("app.brandName")} /><input aria-label={t("app.brandTagline")} value={config.brandTagline} onChange={(event) => onConfig((value) => ({ ...value, brandTagline: event.target.value }))} placeholder={t("app.taglinePlaceholder")} /></> : <><strong>{config.brandName}</strong><small>{config.brandTagline}</small></>}</span>
-        {editing && <span className="brand__tools"><button type="button" className="icon-button" title={t("app.replaceLogo")} aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><UploadSimple /></button><button type="button" className="icon-button danger" title={t("app.deleteLogo")} aria-label={t("app.deleteLogo")} onClick={() => onConfig((value) => ({ ...value, brandLogo: "" }))}><X /></button><input ref={brandLogoInput} hidden type="file" accept="image/*" onChange={pickBrandLogo} /></span>}
+        {editing && <span className="brand__tools"><button type="button" className="icon-button" title={t("app.replaceLogo")} aria-label={t("app.replaceLogo")} onClick={() => brandLogoInput.current?.click()}><UploadSimple /></button><button type="button" className="icon-button danger" title={t("app.deleteLogo")} aria-label={t("app.deleteLogo")} onClick={() => { if (confirm(t("notice.deleteLogoConfirm"))) onConfig((value) => ({ ...value, brandLogo: "" })); }}><X /></button><input ref={brandLogoInput} hidden type="file" accept="image/*" onChange={pickBrandLogo} /></span>}
       </div>
       <form className="search" onSubmit={search} onFocusCapture={() => setSearchFocused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}>
-        <div ref={enginePicker} className="engine-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setEngineMenu(false); }}><button ref={engineButton} type="button" aria-label={t("app.searchPicker", { engine: engineLabel(config.searchEngine) })} aria-expanded={engineMenu} aria-haspopup="menu" onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openEngineMenu("selected"); } else if (event.key === "ArrowUp") { event.preventDefault(); openEngineMenu("last"); } }} onClick={() => setEngineMenu(!engineMenu)}><Browsers weight="duotone" /><span>{engineLabel(config.searchEngine)}</span><CaretDown /></button>{engineMenu && <div className="engine-menu" role="menu" aria-label={t("app.searchEngines")}>{engineIds.map((id, index) => <button ref={(element) => { engineOptions.current[index] = element; }} type="button" role="menuitemradio" aria-checked={config.searchEngine === id} key={id} className={config.searchEngine === id ? "active" : ""} onKeyDown={(event) => moveEngineFocus(event, index)} onClick={() => { onConfig((value) => ({ ...value, searchEngine: id })); setEngineMenu(false); requestAnimationFrame(() => engineButton.current?.focus()); }}>{engineLabel(id)}<small>{engines[id].host}</small></button>)}</div>}</div>
+        <div ref={enginePicker} className="engine-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setEngineMenu(false); }}><button ref={engineButton} type="button" aria-label={t("app.searchPicker", { engine: engineLabel(config.searchEngine) })} title={t("app.searchPicker", { engine: engineLabel(config.searchEngine) })} aria-expanded={engineMenu} aria-haspopup="menu" onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openEngineMenu("selected"); } else if (event.key === "ArrowUp") { event.preventDefault(); openEngineMenu("last"); } }} onClick={() => setEngineMenu(!engineMenu)}><Browsers weight="duotone" /><span>{engineLabel(config.searchEngine)}</span><CaretDown /></button>{engineMenu && <div className="engine-menu" role="menu" aria-label={t("app.searchEngines")}>{engineIds.map((id, index) => <button ref={(element) => { engineOptions.current[index] = element; }} type="button" role="menuitemradio" aria-checked={config.searchEngine === id} key={id} className={config.searchEngine === id ? "active" : ""} title={engineLabel(id)} onKeyDown={(event) => moveEngineFocus(event, index)} onClick={() => { onConfig((value) => ({ ...value, searchEngine: id })); setEngineMenu(false); requestAnimationFrame(() => engineButton.current?.focus()); }}>{engineLabel(id)}<small>{engines[id].host}</small></button>)}</div>}</div>
         <input value={query} onChange={(event) => { setQuery(event.target.value); setSearchFocused(true); }} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setSearchFocused(false); } }} placeholder={t("app.searchPlaceholder", { engine: engineLabel(config.searchEngine) })} aria-label={t("app.search")} />
-        <button className="search__submit" aria-label={t("app.search")}><MagnifyingGlass weight="bold" /></button>
+        <button className="search__submit" aria-label={t("app.search")} title={t("app.search")}><MagnifyingGlass weight="bold" /></button>
         {searchFocused && query.trim() && !engineMenu && <div className="bookmark-search-results" role="region" aria-label={t("app.bookmarkMatches")}>
           <header><span>{t("app.bookmarkMatches")}</span><small aria-live="polite">{t("app.bookmarkMatchCount", { count: bookmarkMatches.length })}</small></header>
           {bookmarkMatches.length > 0 ? bookmarkMatches.map((item) => <a key={item.node.id} href={item.node.url} onClick={(event) => { setSearchFocused(false); void openBookmarkLink(event, item.node.url, () => moveRecentBookmarkToFront(item.node, item.parent, item.index)); }}><BookmarkSimple weight="duotone" /><span><strong>{item.title}</strong><small>{item.host}</small></span></a>) : <p>{t("app.noBookmarkMatches")}</p>}
         </div>}
       </form>
-      <div className="topbar__actions">{editing && <span className={`sync-status ${native ? "is-native" : ""}`} title={t(native ? "app.chromeNative" : "app.webDemo")}><ArrowsClockwise weight="bold" />{t(native ? "app.chromeConnected" : "app.demoData")}</span>}{!editing && <button className="icon-button edit-entry" aria-label={t("app.editHome")} title={t("app.editHome")} onClick={() => setEditing(true)}><PencilSimple /><span className="sr-only">{t("app.editHome")}</span></button>}{editing && <button className="button button--primary" onClick={() => { setEditing(false); setSettings(false); }}><Check weight="bold" />{t("app.done")}</button>}</div>
+      <div className="topbar__actions">{editing && <span className={`sync-status ${native ? "is-native" : ""}`} title={t(native ? "app.chromeNative" : "app.webDemo")}><ArrowsClockwise weight="bold" />{t(native ? "app.chromeConnected" : "app.demoData")}</span>}{!editing && <button className="icon-button edit-entry" aria-label={t("app.editHome")} title={t("app.editHome")} onClick={() => setEditing(true)}><PencilSimple /><span className="sr-only">{t("app.editHome")}</span></button>}{editing && <button className="button button--primary" title={t("app.done")} onClick={() => { setEditing(false); setSettings(false); }}><Check weight="bold" />{t("app.done")}</button>}</div>
     </header>
 
     {editing && <div className="editbar glass-surface">
       <div className="editbar__mode"><span>{t("app.editHome")}</span><small>{t("app.editHint")}</small></div>
-      <div className="editbar__tools"><button onClick={addFolder}><FolderPlus />{t("app.newComponent")}</button><button onClick={() => activeRoot && setEditor({ parentId: activeRoot.id, type: "bookmark", title: "", url: "", style: "row", width: 4 })}><LinkSimple />{t("app.newBookmark")}</button><button className={config.showSecondaryRoots ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, showSecondaryRoots: !value.showSecondaryRoots }))}>{config.showSecondaryRoots ? <EyeSlash /> : <Eye />}{t(config.showSecondaryRoots ? "app.hideOther" : "app.showOther")}</button><details className="editbar__data"><summary><Database />{t("app.data")}</summary><div><button onClick={() => fileInput.current?.click()}><UploadSimple />{t("app.import")}</button><button onClick={exportConfig}><DownloadSimple />{t("app.backup")}</button><button onClick={exportHtml}><Export />HTML</button></div></details><button onClick={() => setSettings(!settings)} className={settings ? "active" : ""}><GearSix />{t("app.appearance")}</button><input ref={fileInput} hidden type="file" accept=".json,.html,text/html,application/json" onChange={importFile} /></div>
-      <div className="editbar__hint"><SquaresFour />{t("app.layoutHint")}<button onClick={resetLayout}>{t("app.resetLayout")}</button></div>
+      <div className="editbar__tools"><button title={t("app.newComponent")} onClick={addFolder}><FolderPlus />{t("app.newComponent")}</button><button title={t("app.newBookmark")} onClick={() => activeRoot && setEditor({ parentId: activeRoot.id, type: "bookmark", title: "", url: "", style: "row", width: 4 })}><LinkSimple />{t("app.newBookmark")}</button><button title={t(config.showSecondaryRoots ? "app.hideOther" : "app.showOther")} className={config.showSecondaryRoots ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, showSecondaryRoots: !value.showSecondaryRoots }))}>{config.showSecondaryRoots ? <EyeSlash /> : <Eye />}{t(config.showSecondaryRoots ? "app.hideOther" : "app.showOther")}</button><details className="editbar__data"><summary title={t("app.data")}><Database />{t("app.data")}</summary><div><button title={t("app.import")} onClick={() => fileInput.current?.click()}><UploadSimple />{t("app.import")}</button><button title={t("app.backup")} onClick={exportConfig}><DownloadSimple />{t("app.backup")}</button><button title="HTML" onClick={exportHtml}><Export />HTML</button></div></details><button title={t("app.appearance")} onClick={() => setSettings(!settings)} className={settings ? "active" : ""}><GearSix />{t("app.appearance")}</button><input ref={fileInput} hidden type="file" accept=".json,.html,text/html,application/json" onChange={importFile} /></div>
+      <div className="editbar__hint"><SquaresFour />{t("app.layoutHint")}<button title={t("app.resetLayout")} onClick={resetLayout}>{t("app.resetLayout")}</button></div>
     </div>}
 
     <main id="top" className="content">
-      {quickFolder && <QuickAccess folder={quickFolder} config={config} editing={editing} onToggleAll={toggleAll} onEdit={setEditor} onMove={(node) => setMoveTarget(node)} onDelete={deleteNode} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onReorder={reorderQuickBookmark} onMoveInto={moveItemIntoQuickFolder} />}
+      {quickFolder && (quickStyle === "cards"
+        ? <QuickAccess folder={quickFolder} config={config} onConfig={onConfig} editing={editing} onToggleAll={toggleAll} onEdit={setEditor} onMove={(node) => setMoveTarget(node)} onDelete={deleteNode} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onReorder={reorderQuickBookmark} onMoveInto={moveItemIntoQuickFolder} onStyle={(style) => pinFolder(quickFolder, true, style)} onUnpin={() => pinFolder(quickFolder, false, "cards")} />
+        : <div className="pinned-block"><FolderView node={quickFolder} block pinned pageSpan={12} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onTogglePinned={(node, pin) => pinFolder(node, pin)} /></div>
+      )}
       {error && <div className="error-banner">{error}<button onClick={refresh}>{t("app.retry")}</button></div>}
       {!loading && blocks.length === 0 && <div className="empty-state glass-surface"><img className="product-mark product-mark--empty" src={productMark} alt="" /><h2>{t("app.emptyTitle")}</h2><p>{t("app.emptyHint")}</p><button className="button button--primary" onClick={() => setEditing(true)}>{t("app.start")}</button></div>}
       <div className={`bookmark-grid ${editing ? "is-layout-editing" : ""}`}>
         {editing && <div className="grid-guide" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span key={index} />)}</div>}
         {blocks.map((block) => {
           const parsedBlock = parsePresentationTitle(block.title);
-          const titleStyle = (["directory", "icons", "mixed", "dock", "stack", "focus", "columns"] as const).includes(parsedBlock.marker as FolderStyle) ? parsedBlock.marker as FolderStyle : undefined;
-          const blockStyle = config.markerStorageVersion >= 3 ? titleStyle || config.folderStyles[block.id] || "directory" : config.folderStyles[block.id] || titleStyle || "directory";
+          const blockStyle = resolveFolderStyle(block, config, true);
           const configuredWidth = config.markerStorageVersion >= 3 ? parsedBlock.width || config.folderWidths[block.id] : config.folderWidths[block.id] || parsedBlock.width;
           const width = Math.max(3, Math.min(12, configuredWidth || (blockStyle === "directory" ? 4 : blocks.length <= 2 ? 6 : 4)));
           const selected = editing && selectedBlock === block.id;
           return <MasonryArticle key={block.id} width={width} tabIndex={editing ? 0 : undefined} aria-label={editing ? t("app.selectAria", { title: parsedBlock.title }) : undefined} className={`block-wrap ${selected ? "is-selected" : ""} ${draggedBlock === block.id ? "is-dragging" : ""}`} draggable={editing} onClick={() => editing && setSelectedBlock(block.id)} onFocus={() => editing && setSelectedBlock(block.id)} onDragStart={(event) => { setSelectedBlock(block.id); setDraggedBlock(block.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedBlock(null)} onDragOver={(event) => editing && event.preventDefault()} onDrop={(event) => moveBlock(event, block.id)}>
-            {selected ? <div className="block-toolbar"><span className="drag-label"><SquaresFour />{t("app.drag")}</span><div className="width-presets">{widthPresets.map((preset) => { const label = preset.key ? t(preset.key) : preset.label!; return <button type="button" key={preset.value} className={width === preset.value ? "active" : ""} title={`${label} · ${preset.value}/12`} onClick={(event) => { event.stopPropagation(); commitBlockWidth(block, preset.value); }}>{label}</button>; })}</div></div> : editing && <button type="button" className="block-select" onClick={() => setSelectedBlock(block.id)}>{t("app.selectAdjust")}</button>}
-            <FolderView node={block} block pageSpan={width} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} />
+            {selected ? <div className="block-toolbar"><span className="drag-label"><SquaresFour />{t("app.drag")}</span><div className="width-presets">{widthPresets.map((preset) => { const label = preset.key ? t(preset.key) : preset.label!; return <button type="button" key={preset.value} className={width === preset.value ? "active" : ""} title={`${label} · ${preset.value}/12`} onClick={(event) => { event.stopPropagation(); commitBlockWidth(block, preset.value); }}>{label}</button>; })}</div></div> : editing && <button type="button" className="block-select" title={t("app.selectAdjust")} onClick={() => setSelectedBlock(block.id)}>{t("app.selectAdjust")}</button>}
+            <FolderView node={block} block pageSpan={width} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onTogglePinned={(node, pin) => pinFolder(node, pin)} />
             {selected && <ResizeHandle width={width} language={config.language} onWidth={(next) => onConfig((value) => ({ ...value, folderWidths: { ...value.folderWidths, [block.id]: next } }))} onCommit={(next) => commitBlockWidth(block, next)} />}
           </MasonryArticle>;
         })}

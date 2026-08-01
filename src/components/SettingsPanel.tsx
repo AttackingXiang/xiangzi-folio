@@ -10,6 +10,12 @@ import { createTranslator } from "../lib/i18n";
 import { themePresetById, themePresets, withThemePreset } from "../lib/themes";
 
 const accents = ["#8fb9ee", "#ff6b57", "#6558f5", "#2b9d78", "#e89f32", "#e6538e"];
+const themeGroups = [
+  { id: "精选", key: "theme.group.featured" },
+  { id: "明亮", key: "theme.group.light" },
+  { id: "自然", key: "theme.group.nature" },
+  { id: "深色", key: "theme.group.dark" },
+] as const;
 
 type Props = {
   config: AppConfig;
@@ -58,22 +64,32 @@ export function SettingsPanel({ config, onConfig, onClose, onError }: Props) {
   };
 
   return <aside ref={panelRef} className="settings-panel" role="dialog" aria-modal="true" aria-label={t("settings.title")}>
-    <header><div><small>{t("settings.eyebrow")}</small><h2>{t("settings.title")}</h2></div><button className="icon-button" aria-label={t("settings.close")} onClick={onClose}><X /></button></header>
+    <header><div><small>{t("settings.eyebrow")}</small><h2>{t("settings.title")}</h2></div><button className="icon-button" aria-label={t("settings.close")} title={t("settings.close")} onClick={onClose}><X /></button></header>
     <section><div className="setting-row"><div><h3>{t("settings.language")}</h3><p>{t("settings.languageHint")}</p></div><select aria-label={t("settings.language")} value={config.language} onChange={(event) => onConfig((value) => ({ ...value, language: event.target.value as AppConfig["language"] }))}><option value="auto">{t("language.auto")}</option><option value="zh-CN">{t("language.zh")}</option><option value="en">{t("language.en")}</option></select></div></section>
-    <section className="theme-section"><h3><PaintBrush />{t("settings.themePresets")} <small>{t("settings.sets", { count: themePresets.length })}</small></h3><div className="theme-presets">{themePresets.map((theme) => {
-      const previewStyle = { "--preview-background": theme.preview.background, "--preview-surface": theme.preview.surface, "--preview-ink": theme.preview.ink, "--preview-accent": theme.accent } as CSSProperties;
-      const label = t(`theme.${theme.id}`);
-      return <button key={theme.id} className={config.theme === theme.id ? "active" : ""} onClick={() => onConfig((value) => withThemePreset(value, theme.id))} aria-label={t("settings.useTheme", { theme: label })}>
-        <span className="theme-preview" style={previewStyle}><i /><i /><i /></span>
-        <span className="theme-preset__copy"><strong>{label}</strong><small>{t(`theme.${theme.id}.desc`)}</small></span>
-        {config.theme === theme.id && <Check weight="bold" />}
-      </button>;
-    })}</div><div className="theme-summary"><span><strong>{t(`theme.${currentTheme.id}`)}</strong><small>{t(`theme.${currentTheme.id}.audience`)}</small></span><button onClick={() => onConfig((value) => withThemePreset(value, config.theme))}><ArrowCounterClockwise />{t("settings.restoreTheme")}</button></div></section>
-    <section><div className="setting-row"><div><h3><Image />{t("settings.background")}</h3><p>{t("settings.backgroundHint")}</p></div><button className="button button--soft" onClick={() => imageInput.current?.click()}><UploadSimple />{t("settings.chooseImage")}</button><input ref={imageInput} hidden type="file" accept="image/*" onChange={pickBackground} /></div>{config.backgroundImage && <div className="background-preview" style={{ backgroundImage: `url(${config.backgroundImage})` }}><button onClick={() => onConfig((value) => ({ ...value, backgroundImage: "" }))}>{t("settings.restoreBackground")}</button></div>}</section>
-    <section><label className="range-label"><span><strong>{t("settings.blur")}</strong><small className="range-value">{liveBlur}px</small></span><input type="range" min="0" max="36" value={liveBlur} onChange={(event) => onBlurChange(Number(event.target.value))} /></label><label className="range-label"><span><strong>{t("settings.shade")}</strong><small className="range-value">{liveShade}%</small></span><input type="range" min="0" max="75" value={liveShade} onChange={(event) => onShadeChange(Number(event.target.value))} /></label></section>
-    <section><h3><Rows />{t("settings.density")}</h3><div className="segmented"><button className={config.density === "comfortable" ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, density: "comfortable" }))}>{t("settings.comfortable")}</button><button className={config.density === "compact" ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, density: "compact" }))}>{t("settings.compact")}</button></div></section>
-    <section><div className="setting-row"><div><h3><ArrowsClockwise />{t("settings.recent")}</h3><p>{t("settings.recentHint")}</p></div><button className={`toggle ${config.recentClickToFront ? "active" : ""}`} role="switch" aria-label={t("settings.recent")} aria-checked={config.recentClickToFront} onClick={() => onConfig((value) => ({ ...value, recentClickToFront: !value.recentClickToFront }))}><span /></button></div></section>
-    <section><h3>{t("settings.accent")}</h3><div className="color-row">{accents.map((color) => <button key={color} aria-label={color} className={config.accent === color ? "active" : ""} style={{ backgroundColor: color }} onClick={() => onConfig((value) => ({ ...value, accent: color }))} />)}</div></section>
+    <section className="theme-section"><h3><PaintBrush />{t("settings.themePresets")} <small>{t("settings.sets", { count: themePresets.length })}</small></h3>
+      <div className="theme-live-preview" style={{ "--preview-background": currentTheme.preview.background, "--preview-surface": currentTheme.preview.surface, "--preview-ink": currentTheme.preview.ink, "--preview-accent": currentTheme.accent } as CSSProperties} aria-label={t("settings.previewLabel", { theme: t(`theme.${currentTheme.id}`) })}>
+        <span className="theme-live-preview__search" />
+        <span className="theme-live-preview__row"><span className="theme-live-preview__card"><i /><i /></span><span className="theme-live-preview__card"><i /><i /></span><span className="theme-live-preview__card"><i /><i /></span></span>
+      </div>
+      <div className="theme-groups">{themeGroups.map((group) => {
+        const themes = themePresets.filter((theme) => theme.group === group.id);
+        return <div className="theme-group" key={group.id}><div className="theme-group__header"><strong>{t(group.key)}</strong><small>{themes.length}</small></div><div className="theme-presets">{themes.map((theme) => {
+          const previewStyle = { "--preview-background": theme.preview.background, "--preview-surface": theme.preview.surface, "--preview-ink": theme.preview.ink, "--preview-accent": theme.accent } as CSSProperties;
+          const label = t(`theme.${theme.id}`);
+          return <button key={theme.id} className={config.theme === theme.id ? "active" : ""} onClick={() => onConfig((value) => withThemePreset(value, theme.id))} aria-label={t("settings.useTheme", { theme: label })} title={t("settings.useTheme", { theme: label })}>
+            <span className="theme-preview" style={previewStyle}><i /><i /><i /></span>
+            <span className="theme-preset__copy"><strong>{label}</strong><small>{t(`theme.${theme.id}.desc`)}</small><em>{group.id === "精选" ? t("settings.recommended") : t(`theme.${theme.id}.audience`)}</em></span>
+            {config.theme === theme.id && <Check weight="bold" />}
+          </button>;
+        })}</div></div>;
+      })}</div>
+      <div className="theme-summary"><span><strong>{t(`theme.${currentTheme.id}`)}</strong><small>{t(`theme.${currentTheme.id}.audience`)}</small></span><button title={t("settings.restoreTheme")} onClick={() => onConfig((value) => withThemePreset(value, config.theme))}><ArrowCounterClockwise />{t("settings.restoreTheme")}</button></div>
+    </section>
+    <section><div className="setting-row"><div><h3><Image />{t("settings.background")}</h3><p>{t("settings.backgroundHint")}</p></div><button className="button button--soft" title={t("settings.chooseImage")} onClick={() => imageInput.current?.click()}><UploadSimple />{t("settings.chooseImage")}</button><input ref={imageInput} hidden type="file" accept="image/*" onChange={pickBackground} /></div>{config.backgroundImage && <div className="background-preview" style={{ backgroundImage: `url(${config.backgroundImage})` }}><button title={t("settings.restoreBackground")} onClick={() => onConfig((value) => ({ ...value, backgroundImage: "" }))}>{t("settings.restoreBackground")}</button></div>}</section>
+    <section><label className="range-label"><span><strong>{t("settings.blur")}</strong><small className="range-value">{liveBlur}px</small></span><input type="range" min="0" max="36" value={liveBlur} onChange={(event) => onBlurChange(Number(event.target.value))} /></label><label className="range-label"><span><strong>{t("settings.shade")}</strong><small className="range-value">{liveShade}%</small></span><input type="range" min="0" max="75" value={liveShade} onChange={(event) => onShadeChange(Number(event.target.value))} /></label><div className="setting-row setting-row--toggle"><div><h3>{t("settings.folderBackground")}</h3><p>{t("settings.folderBackgroundHint")}</p></div><button type="button" className={`toggle ${config.showFolderBackground ? "active" : ""}`} role="switch" aria-label={t("settings.folderBackground")} title={t("settings.folderBackground")} aria-checked={config.showFolderBackground} onClick={() => onConfig((value) => ({ ...value, showFolderBackground: !value.showFolderBackground }))}><span /></button></div><div className="setting-row setting-row--toggle"><div><h3>{t("settings.folderBorder")}</h3><p>{t("settings.folderBorderHint")}</p></div><button type="button" className={`toggle ${config.showFolderBorder ? "active" : ""}`} role="switch" aria-label={t("settings.folderBorder")} title={t("settings.folderBorder")} aria-checked={config.showFolderBorder} onClick={() => onConfig((value) => ({ ...value, showFolderBorder: !value.showFolderBorder }))}><span /></button></div></section>
+    <section><h3><Rows />{t("settings.density")}</h3><div className="segmented"><button title={t("settings.comfortable")} className={config.density === "comfortable" ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, density: "comfortable" }))}>{t("settings.comfortable")}</button><button title={t("settings.compact")} className={config.density === "compact" ? "active" : ""} onClick={() => onConfig((value) => ({ ...value, density: "compact" }))}>{t("settings.compact")}</button></div></section>
+    <section><div className="setting-row"><div><h3><ArrowsClockwise />{t("settings.recent")}</h3><p>{t("settings.recentHint")}</p></div><button className={`toggle ${config.recentClickToFront ? "active" : ""}`} role="switch" aria-label={t("settings.recent")} title={t("settings.recent")} aria-checked={config.recentClickToFront} onClick={() => onConfig((value) => ({ ...value, recentClickToFront: !value.recentClickToFront }))}><span /></button></div></section>
+    <section><h3>{t("settings.accent")}</h3><div className="color-row">{accents.map((color) => <button key={color} aria-label={color} title={color} className={config.accent === color ? "active" : ""} style={{ backgroundColor: color }} onClick={() => onConfig((value) => ({ ...value, accent: color }))} />)}</div></section>
     <p className="settings-note">{t("settings.note")}</p>
   </aside>;
 }

@@ -3,6 +3,7 @@ node_modules/
 dist/
 .npm-cache/
 .codex/
+.playwright-cli/
 
 *.tsbuildinfo
 vite.config.js

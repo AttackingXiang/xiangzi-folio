@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent } from "react";
 import {
-  ArrowSquareOut, CaretDown, CaretRight, DotsSixVertical, DotsThree, Folder, FolderOpen,
-  GridFour, LinkSimple, ListBullets, PencilSimple, Rows, SquaresFour, Trash,
+  ArrowSquareOut, CaretDown, CaretRight, Cards, DotsSixVertical, DotsThree, Eye, EyeSlash, Folder, FolderOpen,
+  GridFour, LinkSimple, ListBullets, PencilSimple, Rows, SquaresFour, Star, Trash,
 } from "@phosphor-icons/react";
-import { bookmarks, collectLinks, countLinks, parsePresentationTitle, setFolderPresentationTitle } from "../lib/bookmarks";
+import { bookmarks, collectLinks, countLinks, folderStyleOptions, parsePresentationTitle, resolveFolderStyle, setFolderPresentationTitle } from "../lib/bookmarks";
 import { favicon } from "../lib/favicon";
 import { createTranslator } from "../lib/i18n";
 import { openBookmarkLink } from "../lib/navigation";
@@ -11,7 +11,7 @@ import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle, 
 
 export const stylesList: Array<{ id: FolderStyle; icon: typeof ListBullets }> = [
   { id: "directory", icon: ListBullets }, { id: "icons", icon: GridFour }, { id: "mixed", icon: SquaresFour }, { id: "dock", icon: Rows },
-  { id: "stack", icon: ListBullets }, { id: "focus", icon: SquaresFour }, { id: "columns", icon: Rows },
+  { id: "stack", icon: ListBullets }, { id: "focus", icon: SquaresFour }, { id: "columns", icon: Rows }, { id: "cards", icon: Cards },
 ];
 
 type Props = {
@@ -22,6 +22,7 @@ type Props = {
   block?: boolean;
   siblingIndex?: number;
   pageSpan?: number;
+  pinned?: boolean;
   onConfig: (recipe: (value: AppConfig) => AppConfig) => void;
   onEdit: (value: EditorValue) => void;
   onRefresh: () => Promise<void>;
@@ -31,6 +32,7 @@ type Props = {
   onNewBookmark: (parentId: string, defaults: Pick<EditorValue, "style" | "width" | "rows">) => void;
   onDelete: (node: BookmarkNode, parentId: string, index: number) => void;
   onRecentClick: (node: BookmarkNode, parent: BookmarkNode, index: number) => Promise<void>;
+  onTogglePinned?: (node: BookmarkNode, pin: boolean) => void;
 };
 
 const dragMime = "application/x-xiangzi-folio-bookmark";
@@ -88,10 +90,11 @@ function newBookmarkDefaults(style: FolderStyle): Pick<EditorValue, "style" | "w
   if (style === "stack") return { style: "compact", width: 4, rows: 1 };
   if (style === "focus") return { style: "featured", width: 8, rows: 1 };
   if (style === "columns") return { style: "row", width: 6, rows: 1 };
+  if (style === "cards") return { style: "row", width: 3, rows: 1 };
   return { style: "row", width: 4, rows: 1 };
 }
 
-function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDelete, onRecentClick, dropTarget, variant = "row", defaultWidth, pageSpan = 12 }: {
+function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDelete, onRecentClick, dropTarget, variant = "row", defaultWidth, pageSpan = 12, cards = false }: {
   node: BookmarkNode; parent: BookmarkNode; index: number; editing: boolean;
   config: AppConfig;
   onEdit: Props["onEdit"];
@@ -100,6 +103,11 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDele
   variant?: "row" | "tile" | "featured" | "dock";
   defaultWidth?: number;
   pageSpan?: number;
+  // Purely a display flag: shows the host subtitle and applies the card
+  // visual treatment on top of the "row" variant. It never gets persisted —
+  // the bookmark's own saved style (if any) still wins, exactly as for every
+  // other variant.
+  cards?: boolean;
 }) {
   const [broken, setBroken] = useState(false);
   const t = createTranslator(config.language);
@@ -120,23 +128,33 @@ function LinkItem({ node, parent, index, config, editing, onEdit, onMove, onDele
     captureBookmarkDropSlots();
   };
   return (
-    <div className={`bookmark bookmark--${markedVariant} ${compact ? "bookmark--compact" : ""} ${rows === 2 ? "bookmark--tall" : ""} ${organize ? "is-organizing" : ""} ${dropTarget ? "is-drop-target" : ""}`} style={{ "--item-span": itemWidth } as CSSProperties} draggable={organize} onDragStart={beginDrag} onDragEnd={() => { activeDragItem = null; activeDropSlots = []; window.dispatchEvent(new Event(dragEndEvent)); }} data-testid={`bookmark-${node.id}`} data-bookmark-id={node.id} data-parent-id={parent.id} data-bookmark-index={index} data-bookmark-title={parsed.title}>
+    <div className={`bookmark bookmark--${markedVariant} ${cards ? "bookmark--card" : ""} ${compact ? "bookmark--compact" : ""} ${rows === 2 ? "bookmark--tall" : ""} ${organize ? "is-organizing" : ""} ${dropTarget ? "is-drop-target" : ""}`} style={{ "--item-span": itemWidth } as CSSProperties} draggable={organize} onDragStart={beginDrag} onDragEnd={() => { activeDragItem = null; activeDropSlots = []; window.dispatchEvent(new Event(dragEndEvent)); }} data-testid={`bookmark-${node.id}`} data-bookmark-id={node.id} data-parent-id={parent.id} data-bookmark-index={index} data-bookmark-title={parsed.title}>
       {organize && <span className="bookmark__drag" title={t("action.dragSort")} aria-label={t("action.dragSort")}><DotsSixVertical weight="bold" /></span>}
       <a href={node.url} draggable={false} className="bookmark__link" title={`${parsed.title}\n${node.url}`} onClick={(event) => { if (editing) { event.preventDefault(); return; } void openBookmarkLink(event, node.url, () => onRecentClick(node, parent, index)); }}>
         <span className="favicon" aria-hidden="true">
           {!broken && node.url ? <img src={favicon(node.url)} alt="" onError={() => setBroken(true)} /> : <span>{parsed.title.slice(0, 1).toUpperCase()}</span>}
         </span>
-        <span className="bookmark__copy"><strong>{parsed.title || t("common.unnamed")}</strong>{markedVariant === "featured" && <small>{node.url?.replace(/^https?:\/\//, "").split("/")[0]}</small>}</span>
-        {markedVariant === "row" && <ArrowSquareOut className="bookmark__open" weight="bold" />}
+        <span className="bookmark__copy"><strong>{parsed.title || t("common.unnamed")}</strong>{(markedVariant === "featured" || cards) && <small>{node.url?.replace(/^https?:\/\//, "").split("/")[0]}</small>}</span>
+        {markedVariant === "row" && !cards && <ArrowSquareOut className="bookmark__open" weight="bold" />}
       </a>
       {organize && (
-        <div className="bookmark__actions"><button className="icon-button" aria-label={t("action.editBookmark", { title: parsed.title })} title={t("action.editBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows }); }}><PencilSimple /></button><button className="icon-button" aria-label={t("action.moveBookmark", { title: parsed.title })} title={t("move.bookmark")} onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button><button className="icon-button danger" aria-label={t("action.deleteBookmark", { title: parsed.title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onDelete(node, parent.id, index); }}><Trash /></button></div>
+        <div className="bookmark__actions"><button className="icon-button" aria-label={t("action.editBookmark", { title: parsed.title })} title={t("action.editBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title: parsed.title, url: node.url || "", style: itemStyle, width: itemWidth, rows, cardsContext: cards }); }}><PencilSimple /></button><button className="icon-button" aria-label={t("action.moveBookmark", { title: parsed.title })} title={t("move.bookmark")} onClick={(event) => { event.preventDefault(); onMove(node); }}><LinkSimple /></button><button className="icon-button danger" aria-label={t("action.deleteBookmark", { title: parsed.title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={(event) => { event.preventDefault(); onDelete(node, parent.id, index); }}><Trash /></button></div>
       )}
     </div>
   );
 }
 
-export function FolderView({ node, config, editing, level = 0, block = false, siblingIndex = node.index ?? 0, pageSpan = 12, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick }: Props) {
+function CollapsedFolderPreview({ children }: { children: BookmarkNode[] }) {
+  const links = children.filter((child) => !!child.url).slice(0, 3);
+  if (!links.length) return null;
+  const total = children.filter((child) => !!child.url).length;
+  return <div className="folder__collapsed-preview" aria-hidden="true">
+    {links.map((child) => <span key={child.id} title={child.title}>{child.url ? <img src={favicon(child.url, 32)} alt="" /> : child.title.slice(0, 1)}</span>)}
+    {total > links.length && <small>+{total - links.length}</small>}
+  </div>;
+}
+
+export function FolderView({ node, config, editing, level = 0, block = false, siblingIndex = node.index ?? 0, pageSpan = 12, pinned = false, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick, onTogglePinned }: Props) {
   const t = createTranslator(config.language);
   const [menu, setMenu] = useState(false);
   const [dropReady, setDropReady] = useState(false);
@@ -171,9 +189,11 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
     return () => document.removeEventListener("pointerdown", close);
   }, [menu]);
   const parsedFolder = parsePresentationTitle(node.title);
-  const markerStyle = ["directory", "icons", "mixed", "dock", "stack", "focus", "columns"].includes(parsedFolder.marker || "") ? parsedFolder.marker as FolderStyle : undefined;
-  const style = config.markerStorageVersion >= 3 ? markerStyle || config.folderStyles[node.id] || (block ? "directory" : "icons") : config.folderStyles[node.id] || markerStyle || (block ? "directory" : "icons");
+  const markerStyle = folderStyleOptions.includes(parsedFolder.marker as FolderStyle) ? parsedFolder.marker as FolderStyle : undefined;
+  const style = resolveFolderStyle(node, config, block);
   const collapsed = config.markerStorageVersion >= 3 && markerStyle ? !!parsedFolder.collapsed : config.collapsed.includes(node.id) || !!parsedFolder.collapsed;
+  const transparent = !!config.folderTransparent[node.id];
+  const borderless = !!config.folderBorderless[node.id];
   const children = node.children || [];
   const links = useMemo(() => collectLinks(node), [node]);
   const directLinks = useMemo(() => children.filter((child) => !!child.url), [children]);
@@ -226,7 +246,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
       collapsed: next.collapsed ? [...new Set([...value.collapsed, node.id])] : value.collapsed.filter((id) => id !== node.id),
     }));
     if (!virtual) {
-      await bookmarks.update(node.id, { title: setFolderPresentationTitle(node.title, next) });
+      await bookmarks.update(node.id, { title: setFolderPresentationTitle(node.title, { ...next, pinned }) });
       await onRefresh();
     }
     onToast(message);
@@ -244,6 +264,18 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   const changeWidth = async (next: number) => {
     try { await syncPresentation({ style, width: next, collapsed }, t("folder.widthSynced")); }
     catch (reason) { onToast(reason instanceof Error ? reason.message : t("folder.syncError")); }
+  };
+  const toggleTransparent = () => {
+    const next = !transparent;
+    onConfig((value) => ({ ...value, folderTransparent: { ...value.folderTransparent, [node.id]: next } }));
+    setMenu(false);
+    onToast(t(next ? "folder.transparentOn" : "folder.transparentOff"));
+  };
+  const toggleBorderless = () => {
+    const next = !borderless;
+    onConfig((value) => ({ ...value, folderBorderless: { ...value.folderBorderless, [node.id]: next } }));
+    setMenu(false);
+    onToast(t(next ? "folder.borderlessOn" : "folder.borderlessOff"));
   };
   const dropInto = async (event: DragEvent) => {
     if (!organize) return;
@@ -292,13 +324,13 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
   };
   const bookmarkGridDrag = { onDragEnter: previewBookmarkAtPointer, onDragOver: previewBookmarkAtPointer, onDrop: dropAtBookmarkPreview };
   const common = { config, editing, pageSpan: componentSpan, onConfig, onEdit, onRefresh, onToast, onMove, onNewFolder, onNewBookmark, onDelete, onRecentClick };
-  const renderLink = (child: BookmarkNode, index: number, variant: "row" | "tile" | "featured" | "dock", defaultWidth?: number) => <Fragment key={`${child.id}-${index}`}>
+  const renderLink = (child: BookmarkNode, index: number, variant: "row" | "tile" | "featured" | "dock", defaultWidth?: number, cards = false) => <Fragment key={`${child.id}-${index}`}>
     {bookmarkDropPreview?.targetId === child.id && <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} language={config.language} />}
-    <LinkItem node={child} parent={parentFor(child)} index={child.index ?? index} config={config} variant={variant} defaultWidth={defaultWidth} pageSpan={componentSpan} editing={editing} onEdit={onEdit} onMove={onMove} onDelete={onDelete} onRecentClick={onRecentClick} dropTarget={bookmarkDropPreview?.targetId === child.id} />
+    <LinkItem node={child} parent={parentFor(child)} index={child.index ?? index} config={config} variant={variant} defaultWidth={defaultWidth} pageSpan={componentSpan} editing={editing} onEdit={onEdit} onMove={onMove} onDelete={onDelete} onRecentClick={onRecentClick} dropTarget={bookmarkDropPreview?.targetId === child.id} cards={cards} />
   </Fragment>;
   const renderTail = (variant: "row" | "tile" | "featured" | "dock") => bookmarkDropPreview?.targetId === `tail-${node.id}` ? <BookmarkDropPlaceholder preview={bookmarkDropPreview} variant={variant} language={config.language} /> : null;
   return (
-    <section className={`folder ${block ? "folder--block" : "folder--nested"} folder--${displayStyle} ${collapsed ? "is-collapsed" : ""} ${links.length > 12 ? "is-dense" : ""} ${dropReady && !bookmarkDropPreview ? "is-drop-ready" : ""}`} style={{ "--page-columns": componentSpan, ...(!block ? { "--folder-span": renderedFolderSpan } : {}) } as React.CSSProperties} data-folder-id={node.id} data-native-title={node.title} onDragEnter={previewFolderDrop} onDragLeave={() => setDropReady(false)} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
+    <section className={`folder ${block ? "folder--block" : "folder--nested"} folder--${displayStyle} ${collapsed ? "is-collapsed" : ""} ${transparent ? "is-transparent" : ""} ${borderless ? "is-borderless" : ""} ${menu ? "has-style-menu" : ""} ${links.length > 12 ? "is-dense" : ""} ${dropReady && !bookmarkDropPreview ? "is-drop-ready" : ""}`} style={{ "--page-columns": componentSpan, ...(!block ? { "--folder-span": renderedFolderSpan } : {}) } as React.CSSProperties} data-folder-id={node.id} data-native-title={node.title} onDragEnter={previewFolderDrop} onDragLeave={() => setDropReady(false)} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
       {organize && dropReady && !bookmarkDropPreview && <div className="folder-drop-overlay" aria-hidden="true"><FolderOpen weight="fill" /><strong>{t("common.dropHere")}</strong><small>{t("common.moveInto", { title: parsedFolder.title })}</small></div>}
       <header className="folder__header" onDragEnter={previewFolderDrop} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropOnFolderHeader}>
         {organize && !virtual && <span className="folder__drag" draggable onDragStart={beginFolderDrag} onDragEnd={() => { activeDragItem = null; setDropReady(false); window.dispatchEvent(new Event(dragEndEvent)); }} title={t("folder.drag")} aria-label={t("folder.dragAria", { title: parsedFolder.title })}><DotsSixVertical weight="bold" /></span>}
@@ -311,13 +343,14 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
         {organize && <span className="drop-hint">{t("folder.dropHint")}</span>}
         {editing && (
           <div ref={styleActions} className="folder__actions" onKeyDown={(event) => { if (event.key === "Escape" && menu) { event.preventDefault(); setMenu(false); styleTrigger.current?.focus(); } }}>
-            {!virtual && <><button className="icon-button" title={t("action.editFolder", { title: "" }).trim()} aria-label={t("action.editFolder", { title: parsedFolder.title })} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed })}><PencilSimple /></button><button className="icon-button" title={t("move.folder")} aria-label={t("action.moveFolder", { title: parsedFolder.title })} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title={t("app.newBookmark")} aria-label={t("action.newBookmarkIn", { title: parsedFolder.title })} onClick={() => onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><LinkSimple /></button><button className="icon-button" title={t("quick.newFolder")} aria-label={t("action.newFolderIn", { title: parsedFolder.title })} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
-            <button ref={styleTrigger} className="icon-button" title={t("action.style")} aria-label={`${t("action.style")} ${parsedFolder.title}`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><DotsThree weight="bold" /></button>
-            {menu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">{t("editor.appearance")}</small>{stylesList.map((item) => <button role="menuitemradio" aria-checked={style === item.id} key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{t(`folder.style.${item.id}`)}</button>)}{!block && <><small role="presentation" className="style-menu__label">{t("folder.internalWidth")}</small><div role="group" aria-label={t("folder.internalWidth")} className="style-menu__widths">{[{ value: 12, label: t("editor.fullRow") }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button role="menuitemradio" aria-checked={nestedWidth === item.value} key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}</div>}
-            {!virtual && <button className="icon-button danger" title={t("action.deleteFolder", { title: "" }).trim()} aria-label={t("action.deleteFolder", { title: parsedFolder.title })} onClick={() => onDelete(node, node.parentId || effectiveParent.id, siblingIndex)}><Trash /></button>}
+            {!virtual && <><button className="icon-button" title={t("action.editFolder", { title: "" }).trim()} aria-label={t("action.editFolder", { title: parsedFolder.title })} onClick={() => onEdit({ id: node.id, parentId: node.parentId, type: "folder", title: parsedFolder.title, url: "", folderStyle: style, width: nestedWidth, collapsed, transparent, borderless, pinned })}><PencilSimple /></button><button className="icon-button" title={t("move.folder")} aria-label={t("action.moveFolder", { title: parsedFolder.title })} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button" title={t("app.newBookmark")} aria-label={t("action.newBookmarkIn", { title: parsedFolder.title })} onClick={() => onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><LinkSimple /></button><button className="icon-button" title={t("quick.newFolder")} aria-label={t("action.newFolderIn", { title: parsedFolder.title })} onClick={() => onNewFolder(node.id)}><FolderOpen /></button></>}
+            <button ref={styleTrigger} className="icon-button folder__style-trigger" title={t("action.style")} aria-label={`${t("action.style")} ${parsedFolder.title}`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><DotsThree weight="bold" /><span>{t("action.style")}</span></button>
+            {menu && <div className="style-menu" role="menu"><small role="presentation" className="style-menu__label">{t("editor.appearance")}</small>{stylesList.map((item) => <button role="menuitemradio" aria-checked={style === item.id} key={item.id} className={style === item.id ? "active" : ""} onClick={() => changeStyle(item.id)}><item.icon />{t(`folder.style.${item.id}`)}</button>)}<small role="presentation" className="style-menu__label">{t("folder.transparent")}</small><button role="menuitemcheckbox" aria-checked={transparent} className={transparent ? "active" : ""} onClick={toggleTransparent}>{transparent ? <EyeSlash /> : <Eye />}{t(transparent ? "folder.opaque" : "folder.transparent")}</button><small role="presentation" className="style-menu__label">{t("folder.borderless")}</small><button role="menuitemcheckbox" aria-checked={borderless} className={borderless ? "active" : ""} onClick={toggleBorderless}>{borderless ? <EyeSlash /> : <Eye />}{t(borderless ? "folder.bordered" : "folder.borderless")}</button>{!block && <><small role="presentation" className="style-menu__label">{t("folder.internalWidth")}</small><div role="group" aria-label={t("folder.internalWidth")} className="style-menu__widths">{[{ value: 12, label: t("editor.fullRow") }, { value: 6, label: "1/2" }, { value: 4, label: "1/3" }, { value: 3, label: "1/4" }].map((item) => <button role="menuitemradio" aria-checked={nestedWidth === item.value} key={item.value} className={nestedWidth === item.value ? "active" : ""} onClick={() => changeWidth(item.value)}>{item.label}</button>)}</div></>}{block && !virtual && onTogglePinned && <><small role="presentation" className="style-menu__label">{t("folder.pin")}</small><button role="menuitemradio" aria-checked={pinned} className={pinned ? "active" : ""} onClick={() => { setMenu(false); onTogglePinned(node, !pinned); }}><Star weight={pinned ? "fill" : "regular"} />{t(pinned ? "folder.unpin" : "folder.pinAsQuick")}</button></>}</div>}
+            {!virtual && !pinned && <button className="icon-button danger" title={t("action.deleteFolder", { title: "" }).trim()} aria-label={t("action.deleteFolder", { title: parsedFolder.title })} onClick={() => onDelete(node, node.parentId || effectiveParent.id, siblingIndex)}><Trash /></button>}
           </div>
         )}
       </header>
+      {collapsed && <CollapsedFolderPreview children={children} />}
       {!collapsed && <div className="folder__body" onDragEnter={previewFolderDrop} onDragOver={(event) => { if (organize) { event.preventDefault(); event.stopPropagation(); } }} onDrop={dropInto}>
         {children.length === 0 && <button className="empty-folder" onClick={() => editing && onNewBookmark(node.id, newBookmarkDefaults(displayStyle))}><Folder />{t("folder.empty")}{editing && ` · ${t("folder.addBookmark")}`}</button>}
         {(displayStyle === "directory" || displayStyle === "stack" || displayStyle === "columns") && <div className="directory-grid" {...bookmarkGridDrag}>{children.map((child, index) => child.url
@@ -327,6 +360,7 @@ export function FolderView({ node, config, editing, level = 0, block = false, si
         {displayStyle === "mixed" && directLinks.length > 0 && <div className="mixed-grid" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index === 0 ? "featured" : "tile"))}{renderTail("tile")}</div>}
         {displayStyle === "dock" && directLinks.length > 0 && <div className="dock-list" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "dock"))}{renderTail("dock")}</div>}
         {displayStyle === "focus" && directLinks.length > 0 && <div className="focus-list" {...bookmarkGridDrag}>{directLinks.map((child, index) => renderLink(child, child.index ?? children.indexOf(child), index < 2 ? "featured" : "row"))}{renderTail("row")}</div>}
+        {displayStyle === "cards" && directLinks.length > 0 && <div className="cards-grid" {...bookmarkGridDrag}>{directLinks.map((child) => renderLink(child, child.index ?? children.indexOf(child), "row", 3, true))}{renderTail("row")}</div>}
         {displayStyle !== "directory" && displayStyle !== "stack" && displayStyle !== "columns" && childFolders.length > 0 && <div className="folder-groups">{childFolders.map((child) => <FolderView key={child.id} node={child} siblingIndex={children.indexOf(child)} level={level + 1} {...common} />)}</div>}
         {organize && <div className="folder-drop-zone" onDragEnter={previewFolderDrop} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={dropInto}><FolderOpen />{t("folder.dropZone", { title: parsedFolder.title })}</div>}
       </div>}

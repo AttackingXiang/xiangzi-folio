@@ -8,7 +8,7 @@ export type BookmarkNode = {
   children?: BookmarkNode[];
 };
 
-export type FolderStyle = "directory" | "icons" | "mixed" | "dock" | "stack" | "focus" | "columns";
+export type FolderStyle = "directory" | "icons" | "mixed" | "dock" | "stack" | "focus" | "columns" | "cards";
 export type BookmarkStyle = "row" | "tile" | "featured" | "dock" | "compact";
 export type ThemeMode =
   | "glass" | "paper" | "night" | "terminal" | "orbital" | "circuit"
@@ -25,10 +25,14 @@ export type AppConfig = {
   glassStrength: number;
   backgroundImage: string;
   backgroundShade: number;
+  showFolderBackground: boolean;
+  showFolderBorder: boolean;
   searchEngine: SearchEngine;
   collapsed: string[];
   folderStyles: Record<string, FolderStyle>;
   folderWidths: Record<string, number>;
+  folderTransparent: Record<string, boolean>;
+  folderBorderless: Record<string, boolean>;
   bookmarkStyles: Record<string, BookmarkStyle>;
   bookmarkWidths: Record<string, number>;
   bookmarkRows: Record<string, 1 | 2>;
@@ -62,4 +66,12 @@ export type EditorValue = {
   rows?: 1 | 2;
   folderStyle?: FolderStyle;
   collapsed?: boolean;
+  transparent?: boolean;
+  borderless?: boolean;
+  pinned?: boolean;
+  // True when this bookmark renders inside a quick-access/cards grid, where
+  // width is a 10-column span capped well below "full row" — the editor
+  // shows a differently-labeled width picker there instead of FolderView's
+  // 12-column "整行/1/2/1/3" vocabulary, which would misrepresent it.
+  cardsContext?: boolean;
 };
