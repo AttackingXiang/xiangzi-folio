@@ -6,6 +6,9 @@ export type BookmarkNode = {
   url?: string;
   dateAdded?: number;
   children?: BookmarkNode[];
+  // UI-only count for the virtual direct-bookmark block. Native Chrome nodes
+  // never carry this field and it is not persisted.
+  virtualParentChildCount?: number;
 };
 
 export type FolderStyle = "directory" | "icons" | "mixed" | "dock" | "stack" | "focus" | "columns" | "cards";

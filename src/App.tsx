@@ -29,8 +29,17 @@ const widthPresets = [{ value: 12, key: "editor.fullRow" }, { value: 9, label: "
 const productMark = "/icons/brand-mark.png";
 
 function flattenBlocks(roots: BookmarkNode[]): BookmarkNode[] {
-  const links = roots.flatMap((root) => (root.children || []).filter((item) => item.url));
-  const direct = links.length ? { id: "direct-all", parentId: roots[0]?.id, title: "快捷书签", children: links } : null;
+  const links = roots.flatMap((root) => {
+    const children = root.children || [];
+    return children.filter((item) => item.url).map((item) => item.index === undefined ? { ...item, index: children.indexOf(item) } : item);
+  });
+  // Tail drops on this virtual block always land in roots[0] (see the
+  // targetParentId it stamps in FolderView's tail-drop preview), so the count
+  // has to be roots[0]'s own native array length — which legitimately can be 0
+  // when every visible link came from a secondary root. `||` would treat that
+  // real zero as "unknown" and substitute the cross-root link count instead,
+  // landing the append at the wrong native index.
+  const direct = links.length ? { id: "direct-all", parentId: roots[0]?.id, title: "快捷书签", children: links, virtualParentChildCount: roots[0]?.children?.length ?? links.length } : null;
   return [...(direct ? [direct] : []), ...roots.flatMap((root) => (root.children || []).filter((item) => !item.url && !isQuickAccessFolder(item)))];
 }
 

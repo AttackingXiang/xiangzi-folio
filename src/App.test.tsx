@@ -3,11 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { bookmarks, setBookmarkPresentationTitle, setFolderPresentationTitle } from "./lib/bookmarks";
+import { clearActiveDragItem } from "./lib/dragSession";
 import { CONFIG_KEY, defaultConfig } from "./lib/config";
 
 describe("Xiangzi Folio app", () => {
   beforeEach(() => localStorage.clear());
-  afterEach(() => vi.restoreAllMocks());
+  // The active drag item is module state that normally dies with the native
+  // dragend. A test that asserts mid-drag never fires one, so reset it here or
+  // an unrelated later test inherits a phantom drag.
+  afterEach(() => { clearActiveDragItem(); vi.restoreAllMocks(); });
 
   it("uses Google web search by default and renders nested bookmarks", async () => {
     render(<App />);
@@ -32,6 +36,7 @@ describe("Xiangzi Folio app", () => {
     const quickBookmark = await screen.findByTestId("quick-bookmark-91");
     expect(quickBookmark).toHaveAttribute("data-quick-span", "2");
     expect(quickBookmark).toHaveStyle({ "--quick-mobile-span": "5" });
+    expect(quickBookmark).toHaveAttribute("draggable", "true");
     expect(screen.getByRole("region", { name: "常用入口" })).toHaveClass("is-transparent");
   });
 
@@ -228,19 +233,74 @@ describe("Xiangzi Folio app", () => {
     vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
     vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
     vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(200));
-    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
     const dragAt = (type: "dragover" | "drop", x: number) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
       fireEvent(grid, event);
     };
-    dragAt("dragover", 150);
+    dragAt("dragover", 120);
     expect(screen.getByText("放到这里").closest(".quick-access__drop-placeholder")?.nextElementSibling).toBe(second);
     dragAt("dragover", 350);
     expect(screen.getByLabelText("放到这里，位于本组末尾")).toBeInTheDocument();
-    dragAt("dragover", 150);
-    dragAt("drop", 150);
+    dragAt("dragover", 120);
+    dragAt("drop", 120);
     await waitFor(() => expect(move).toHaveBeenCalledWith("93", { parentId: "90", index: 1 }));
+  });
+
+  it("reorders quick-access bookmarks without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "93", parentId: "90", index: 1, title: "Gemini", url: "https://gemini.google.com" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const first = await screen.findByTestId("quick-bookmark-91");
+    const second = screen.getByTestId("quick-bookmark-92");
+    const source = screen.getByTestId("quick-bookmark-93");
+    const grid = first.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(200));
+    const dragAt = (type: "dragover" | "drop", x: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+      fireEvent(grid, event);
+    };
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    dragAt("dragover", 120);
+    expect(screen.getByText("放到这里").closest(".quick-access__drop-placeholder")?.nextElementSibling).toBe(second);
+    dragAt("drop", 120);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("93", { parentId: "90", index: 1 }));
+  });
+
+  it("swallows a no-op quick-access drop instead of appending to the shelf", async () => {
+    // Regression: a suppressed no-op leaves no preview, and an unclaimed drop
+    // bubbles to the shelf's "move into quick access" handler, which re-appends
+    // the bookmark to the last slot.
+    const move = vi.spyOn(bookmarks, "move");
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const first = await screen.findByTestId("quick-bookmark-91");
+    const source = screen.getByTestId("quick-bookmark-92");
+    const third = screen.getByTestId("quick-bookmark-93");
+    const grid = first.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(100));
+    vi.spyOn(third, "getBoundingClientRect").mockReturnValue(rect(200));
+    const dragAt = (type: "dragover" | "drop", x: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+      fireEvent(grid, event);
+    };
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    // Leading half of 93 resolves to the slot 92 already occupies.
+    dragAt("dragover", 220);
+    expect(screen.queryByText("放到这里")).not.toBeInTheDocument();
+    dragAt("drop", 220);
+    expect(move).not.toHaveBeenCalled();
+    expect(screen.queryByText(/移入/)).not.toBeInTheDocument();
   });
 
   it("moves a regular bookmark into a quick-access child folder by dropping on its header area", async () => {
@@ -257,6 +317,22 @@ describe("Xiangzi Folio app", () => {
     expect(await screen.findByText("移入“影音与社区”")).toBeInTheDocument();
     fireEvent.drop(destination!, { dataTransfer });
     await waitFor(() => expect(move).toHaveBeenCalledWith("101", { parentId: "94" }));
+  });
+
+  it("ignores a bookmark dropped on the quick-access group it already lives in", async () => {
+    // Same regression as the page-folder case, for a quick-access child group.
+    const move = vi.spyOn(bookmarks, "move");
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "move", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    dataTransfer.setData("application/x-xiangzi-folio-bookmark", JSON.stringify({ id: "95", parentId: "94", index: 0, type: "bookmark" }));
+    render(<App />);
+    await screen.findByTestId("quick-bookmark-91");
+    const destination = document.querySelector<HTMLElement>('[data-folder-id="94"]');
+    expect(destination).not.toBeNull();
+    fireEvent.dragEnter(destination!, { dataTransfer });
+    fireEvent.drop(destination!, { dataTransfer });
+    expect(move).not.toHaveBeenCalled();
+    expect(screen.queryByText(/移入/)).not.toBeInTheDocument();
   });
 
   it("moves a regular page bookmark into the quick-access root by dropping on its direct-entry area", async () => {
@@ -282,6 +358,20 @@ describe("Xiangzi Folio app", () => {
     const dataTransfer = { effectAllowed: "none", types: [] as string[], setData: (type: string, value: string) => { data.set(type, value); if (!dataTransfer.types.includes(type)) dataTransfer.types.push(type); }, getData: (type: string) => data.get(type) || "" };
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "编辑主页" }));
+    const source = await screen.findByTestId("quick-bookmark-93");
+    const destination = document.querySelector<HTMLElement>('[data-folder-id="110"] > .folder__header');
+    expect(destination).not.toBeNull();
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(destination!, { dataTransfer });
+    fireEvent.drop(destination!, { dataTransfer });
+    await waitFor(() => expect(move).toHaveBeenCalledWith("93", { parentId: "110" }));
+  });
+
+  it("moves a quick-access bookmark into an ordinary folder without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "93", parentId: "110", title: "Gemini", url: "https://gemini.google.com" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", types: [] as string[], setData: (type: string, value: string) => { data.set(type, value); if (!dataTransfer.types.includes(type)) dataTransfer.types.push(type); }, getData: (type: string) => data.get(type) || "" };
+    render(<App />);
     const source = await screen.findByTestId("quick-bookmark-93");
     const destination = document.querySelector<HTMLElement>('[data-folder-id="110"] > .folder__header');
     expect(destination).not.toBeNull();
@@ -397,26 +487,219 @@ describe("Xiangzi Folio app", () => {
     };
     expect(source).toHaveAttribute("draggable", "true");
     fireEvent.dragStart(source, { dataTransfer });
-    dragAt("dragover", 50);
+    // Coordinates stay clear of each slot's midpoint: that midpoint is the
+    // before/after boundary, so a value sitting exactly on it is ambiguous.
+    dragAt("dragover", 25);
     expect(first).toHaveClass("is-drop-target");
     expect(screen.getByText("放到这里").closest(".bookmark-drop-placeholder")?.nextElementSibling).toBe(first);
 
-    dragAt("dragover", 150);
+    dragAt("dragover", 120);
     expect(first).not.toHaveClass("is-drop-target");
     expect(second).toHaveClass("is-drop-target");
-    expect(screen.getByText("放到这里").closest(".bookmark-drop-placeholder")?.nextElementSibling).toBe(second);
+    const hint = screen.getByText("放到这里").closest(".bookmark-drop-placeholder");
+    expect(hint?.nextElementSibling).toBe(second);
+    // The hint is an out-of-flow insertion bar. If it ever regains the
+    // .bookmark class it becomes a grid item again, takes a cell, and pushes
+    // the item under the cursor aside — the exact reflow that made the frozen
+    // hit-test rectangles disagree with what the user sees.
+    expect(hint).not.toHaveClass("bookmark");
 
-    dragAt("dragover", 50);
+    // Trailing half of 102 means "after 102", which is exactly where 103
+    // already sits, so no placeholder is offered for that no-op drop.
+    dragAt("dragover", 180);
+    expect(screen.queryByText("放到这里")).not.toBeInTheDocument();
+
+    dragAt("dragover", 25);
     expect(first).toHaveClass("is-drop-target");
     dragAt("dragover", 350);
     expect(screen.getByLabelText("放到这里，位于 本组末尾 之前")).toBeInTheDocument();
-    dragAt("dragover", 150);
+    dragAt("dragover", 120);
     expect(second).toHaveClass("is-drop-target");
 
-    dragAt("drop", 150);
-    await waitFor(() => expect(move).toHaveBeenCalledWith("103", { parentId: "1", index: 1 }));
+    dragAt("drop", 120);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("103", { parentId: "1", index: 2 }));
     expect(move).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/原书签顺延/)).toBeInTheDocument();
+  });
+
+  it("reorders bookmarks by dragging without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "103", parentId: "1", index: 1, title: "Notion", url: "https://notion.so" });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) || "",
+    };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-103");
+    const first = screen.getByTestId("bookmark-101");
+    const second = screen.getByTestId("bookmark-102");
+    const grid = first.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(200));
+    const dragAt = (type: "dragover" | "drop", x: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+      fireEvent(grid, event);
+    };
+    expect(source).toHaveAttribute("draggable", "true");
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    dragAt("dragover", 120);
+    expect(screen.getByText("放到这里").closest(".bookmark-drop-placeholder")?.nextElementSibling).toBe(second);
+    dragAt("drop", 120);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("103", { parentId: "1", index: 2 }));
+  });
+
+  it("drops onto the trailing half of a later bookmark to move forwards past it", async () => {
+    // Regression: insertion used to always land before the hovered item, so
+    // dragging an item rightwards stopped one slot short and dropping it on its
+    // immediate neighbour did nothing at all.
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "101", parentId: "1", index: 2, title: "Figma", url: "https://figma.com" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-101");
+    const second = screen.getByTestId("bookmark-102");
+    const grid = source.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
+    vi.spyOn(screen.getByTestId("bookmark-103"), "getBoundingClientRect").mockReturnValue(rect(200));
+    const dragAt = (type: "dragover" | "drop", x: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+      fireEvent(grid, event);
+    };
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    dragAt("dragover", 180);
+    expect(screen.getByText("放到这里").closest(".bookmark-drop-placeholder")?.previousElementSibling).toBe(second);
+    dragAt("drop", 180);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("101", { parentId: "1", index: 2 }));
+  });
+
+  it("offers no drop hint when a bookmark is dragged back onto its own position", async () => {
+    const move = vi.spyOn(bookmarks, "move");
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-102");
+    const grid = source.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(screen.getByTestId("bookmark-101"), "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(rect(100));
+    vi.spyOn(screen.getByTestId("bookmark-103"), "getBoundingClientRect").mockReturnValue(rect(200));
+    const dragAt = (type: "dragover" | "drop", x: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+      fireEvent(grid, event);
+    };
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    // Trailing half of 101 and leading half of 103 both resolve to the slot 102
+    // already occupies, so neither offers a placeholder nor issues a move.
+    dragAt("dragover", 80);
+    expect(screen.queryByText("放到这里")).not.toBeInTheDocument();
+    dragAt("dragover", 220);
+    expect(screen.queryByText("放到这里")).not.toBeInTheDocument();
+    dragAt("drop", 220);
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it("reorders an ordinary bookmark onto a quick-access slot without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "103", parentId: "90", index: 1, title: "Notion", url: "https://notion.so" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-103");
+    const first = await screen.findByTestId("quick-bookmark-91");
+    const second = screen.getByTestId("quick-bookmark-92");
+    const grid = first.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    const event = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(event, { clientX: { value: 120 }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+    fireEvent(grid, event);
+    expect(screen.getByText("放到这里").closest(".quick-access__drop-placeholder")?.nextElementSibling).toBe(second);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientX: { value: 120 }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+    fireEvent(grid, drop);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("103", { parentId: "90", index: 1 }));
+  });
+
+  it("reorders a quick-access bookmark onto an ordinary slot without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "93", parentId: "1", index: 2, title: "Gemini", url: "https://gemini.google.com" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("quick-bookmark-93");
+    const first = screen.getByTestId("bookmark-101");
+    const second = screen.getByTestId("bookmark-102");
+    const grid = first.parentElement!;
+    const rect = (left: number) => ({ left, right: left + 100, top: 0, bottom: 100, width: 100, height: 100, x: left, y: 0, toJSON: () => ({}) } as DOMRect);
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(100));
+    fireEvent.dragStart(source.querySelector("a")!, { dataTransfer });
+    const event = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(event, { clientX: { value: 120 }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+    fireEvent(grid, event);
+    expect(screen.getByText("放到这里").closest(".bookmark-drop-placeholder")?.nextElementSibling).toBe(second);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientX: { value: 120 }, clientY: { value: 50 }, dataTransfer: { value: dataTransfer } });
+    fireEvent(grid, drop);
+    await waitFor(() => expect(move).toHaveBeenCalledWith("93", { parentId: "1", index: 2 }));
+  });
+
+  it("moves a bookmark into a folder by dragging without entering edit mode", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "101", parentId: "120", title: "Figma", url: "https://figma.com" });
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-101");
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="120"]')!;
+    const header = folder.querySelector<HTMLElement>(":scope > .folder__header")!;
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(header, { dataTransfer });
+    expect(within(folder).getByText("放到这里")).toBeInTheDocument();
+    fireEvent.drop(header, { dataTransfer });
+    await waitFor(() => expect(move).toHaveBeenCalledWith("101", { parentId: "120" }));
+  });
+
+  it("ignores a bookmark dropped on the header of the folder it already lives in", async () => {
+    // Regression: this coarse "append to folder end" path used to fire for a
+    // reorder drag that missed the grid's precise slot and landed on the
+    // folder's own header/padding instead — flinging the bookmark to the end
+    // of the very folder it was already in. The grid's slot-based handler owns
+    // in-folder reordering; this path should only relocate across folders.
+    const move = vi.spyOn(bookmarks, "move");
+    const data = new Map<string, string>();
+    const dataTransfer = { effectAllowed: "none", setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) || "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-111");
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="110"]')!;
+    const header = folder.querySelector<HTMLElement>(":scope > .folder__header")!;
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(header, { dataTransfer });
+    fireEvent.drop(header, { dataTransfer });
+    expect(move).not.toHaveBeenCalled();
+    expect(screen.queryByText(/移入/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a folder drop working when the browser hides the drag payload at drop time", async () => {
+    const move = vi.spyOn(bookmarks, "move").mockResolvedValue({ id: "101", parentId: "120", title: "Figma", url: "https://figma.com" });
+    const sourceData = new Map<string, string>();
+    const sourceTransfer = { effectAllowed: "none", setData: (type: string, value: string) => sourceData.set(type, value), getData: (type: string) => sourceData.get(type) || "" };
+    const hiddenTransfer = { effectAllowed: "none", types: [], setData: () => undefined, getData: () => "" };
+    render(<App />);
+    const source = await screen.findByTestId("bookmark-101");
+    const folder = document.querySelector<HTMLElement>('[data-folder-id="120"]')!;
+    const header = folder.querySelector<HTMLElement>(":scope > .folder__header")!;
+    fireEvent.dragStart(source, { dataTransfer: sourceTransfer });
+    fireEvent.dragEnter(header, { dataTransfer: hiddenTransfer });
+    fireEvent.drop(header, { dataTransfer: hiddenTransfer });
+    await waitFor(() => expect(move).toHaveBeenCalledWith("101", { parentId: "120" }));
   });
 
   it("drags a nested folder into another Chrome folder", async () => {

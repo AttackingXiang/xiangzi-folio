@@ -5,12 +5,61 @@ import { favicon } from "../lib/favicon";
 import { stylesList } from "./FolderView";
 import { createTranslator } from "../lib/i18n";
 import { openBookmarkLink } from "../lib/navigation";
+import { clearActiveDragItem, getActiveDragItem, setActiveDragItem } from "../lib/dragSession";
 import type { AppConfig, BookmarkNode, BookmarkStyle, EditorValue, FolderStyle } from "../types";
 
 type BookmarkDefaults = Pick<EditorValue, "style" | "width" | "rows">;
 type QuickDragItem = { id: string; parentId: string; index: number; title: string };
-type QuickDropPreview = QuickDragItem & { targetId: string; targetParentId: string; targetIndex: number; targetTitle: string; span: number };
-type QuickDropSlot = Omit<QuickDropPreview, "id" | "parentId" | "index" | "title" | "span"> & { left: number; right: number; top: number; bottom: number; span: number };
+type QuickDropIndicator = { left: number; top: number; width: number; height: number };
+type QuickDropPreview = QuickDragItem & { targetId: string; targetParentId: string; targetIndex: number; targetTitle: string; span: number; after: boolean; indicator: QuickDropIndicator | null };
+type QuickDropSlot = Omit<QuickDropPreview, "id" | "parentId" | "index" | "title" | "span" | "after" | "indicator"> & { left: number; right: number; top: number; bottom: number; span: number };
+
+// Mirrors FolderView: the pointer's side of the hovered tile decides whether
+// the item lands before or after it, and a drop that resolves to the position
+// the item already holds is suppressed instead of animating a hint that would
+// do nothing.
+function quickInsertionIndex(targetIndex: number, after: boolean) { return targetIndex + (after ? 1 : 0); }
+// Same axis choice as FolderView: split left/right inside a row, top/bottom for
+// a tile that is alone on its row.
+function quickSharesRow(hit: QuickDropSlot, slots: QuickDropSlot[]) {
+  return slots.some((slot) => slot !== hit && slot.targetParentId === hit.targetParentId
+    && slot.top < hit.bottom && hit.top < slot.bottom);
+}
+function quickIsAfter(hit: QuickDropSlot, slots: QuickDropSlot[], x: number, y: number) {
+  return quickSharesRow(hit, slots) ? x >= (hit.left + hit.right) / 2 : y >= (hit.top + hit.bottom) / 2;
+}
+
+// Out-of-flow insertion bar, positioned against the grid. See the note on
+// .bookmark-drop-placeholder in styles.css for why it must not take a cell.
+const quickIndicatorThickness = 3;
+function quickEdgeIndicator(host: HTMLElement, target: HTMLElement, after: boolean, horizontal: boolean): QuickDropIndicator {
+  const rect = target.getBoundingClientRect();
+  const box = host.getBoundingClientRect();
+  const left = rect.left - box.left - host.clientLeft;
+  const top = rect.top - box.top - host.clientTop;
+  return horizontal
+    ? { left: left + (after ? rect.width : 0) - quickIndicatorThickness / 2, top, width: quickIndicatorThickness, height: rect.height }
+    : { left, top: top + (after ? rect.height : 0) - quickIndicatorThickness / 2, width: rect.width, height: quickIndicatorThickness };
+}
+function quickIndicatorFor(host: HTMLElement | null, targetId: string, after: boolean, horizontal: boolean) {
+  const target = host?.querySelector<HTMLElement>(`:scope > [data-quick-bookmark-id="${CSS.escape(targetId)}"]`);
+  return host && target ? quickEdgeIndicator(host, target, after, horizontal) : null;
+}
+function quickTailIndicatorFor(host: HTMLElement | null) {
+  const items = host ? Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-quick-bookmark-id]")) : [];
+  const last = items[items.length - 1];
+  if (!host || !last) return null;
+  const rect = last.getBoundingClientRect();
+  const horizontal = items.some((element) => {
+    if (element === last) return false;
+    const other = element.getBoundingClientRect();
+    return other.top < rect.bottom && rect.top < other.bottom;
+  });
+  return quickEdgeIndicator(host, last, true, horizontal);
+}
+function quickIsNoop(insertAt: number, sourceIndex: number, sameParent: boolean) {
+  return sameParent && (insertAt === sourceIndex || insertAt === sourceIndex + 1);
+}
 
 type Props = {
   folder: BookmarkNode;
@@ -38,11 +87,23 @@ const quickDragMime = "application/x-xiangzi-folio-quick";
 function hasPageBookmarkDrag(event: DragEvent) {
   // Chromium deliberately withholds custom payload text until drop. `types` is
   // available throughout the drag, while getData keeps local/test transfers working.
-  return Array.from(event.dataTransfer.types || []).includes(folderDragMime) || !!event.dataTransfer.getData(folderDragMime);
+  if (getActiveDragItem()?.type === "bookmark") return true;
+  if (Array.from(event.dataTransfer.types || []).includes(folderDragMime)) return true;
+  try { return !!event.dataTransfer.getData(folderDragMime); } catch { return false; }
 }
 
 function isQuickBookmarkDrag(event: DragEvent) {
+  if (getActiveDragItem()?.source === "quick") return true;
   return Array.from(event.dataTransfer.types || []).includes(quickDragMime) || !!event.dataTransfer.getData(quickDragMime);
+}
+
+function readPageBookmarkPayload(event: DragEvent) {
+  const active = getActiveDragItem();
+  if (active?.type === "bookmark") return active;
+  let raw = "";
+  try { raw = event.dataTransfer.getData(folderDragMime); } catch { /* ignored */ }
+  if (!raw) return null;
+  try { return JSON.parse(raw) as { id?: string; type?: string; parentId?: string }; } catch { return null; }
 }
 
 function presentationFor(node: BookmarkNode, config: AppConfig): BookmarkDefaults & { span: number; mobileSpan: number } {
@@ -57,24 +118,28 @@ function presentationFor(node: BookmarkNode, config: AppConfig): BookmarkDefault
   return { style, width, rows, span, mobileSpan: span >= 4 ? 10 : 5 };
 }
 
-function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, onMove, onDelete, onRecentClick, onDragStart, onDragEnd }: Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDelete" | "onRecentClick"> & { node: BookmarkNode; parent: BookmarkNode; index: number; preview: QuickDropPreview | null; onDragStart: (event: DragEvent, item: QuickDragItem) => void; onDragEnd: () => void }) {
+function QuickBookmark({ node, parent, index, config, editing, preview, onEdit, onMove, onDelete, onRecentClick, onDragStart, onDragEnd }: Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDelete" | "onRecentClick"> & { node: BookmarkNode; parent: BookmarkNode; index: number; preview: QuickDropPreview | null; onDragStart: (event: DragEvent, item: QuickDragItem, url?: string) => void; onDragEnd: () => void }) {
   const [broken, setBroken] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const parsed = parsePresentationTitle(node.title);
   const t = createTranslator(config.language);
   const title = parsed.title || t("quick.unnamed");
   const presentation = presentationFor(node, config);
   const host = (() => { try { return new URL(node.url || "").hostname.replace(/^www\./, ""); } catch { return ""; } })();
   const item = { id: node.id, parentId: parent.id, index, title };
+  const hinted = preview?.targetId === node.id ? preview : null;
+  const placeholder = hinted ? <div className="quick-access__drop-placeholder" style={hinted.indicator ? { left: hinted.indicator.left, top: hinted.indicator.top, width: hinted.indicator.width, height: hinted.indicator.height } : undefined}><span>{t("common.dropHere")}</span></div> : null;
   return <Fragment>
-    {preview?.targetId === node.id && <div className="quick-access__drop-placeholder" style={{ "--quick-span": preview.span } as CSSProperties}>{t("common.dropHere")}</div>}
-    <article className={`quick-access__item quick-access__item--${presentation.style} ${presentation.rows === 2 ? "is-tall" : ""} ${editing ? "is-editing" : ""} ${preview?.targetId === node.id ? "is-drop-target" : ""}`} style={{ "--quick-span": presentation.span, "--quick-mobile-span": presentation.mobileSpan } as CSSProperties} data-testid={`quick-bookmark-${node.id}`} data-quick-bookmark-id={node.id} data-quick-parent-id={parent.id} data-quick-bookmark-index={index} data-quick-bookmark-title={title} data-quick-span={presentation.span} draggable={editing} onDragStart={(event) => onDragStart(event, item)} onDragEnd={onDragEnd}>
+    {hinted && !hinted.after && placeholder}
+    <article className={`quick-access__item quick-access__item--${presentation.style} ${presentation.rows === 2 ? "is-tall" : ""} ${editing ? "is-editing" : ""} ${dragging ? "is-dragging" : ""} ${preview?.targetId === node.id ? "is-drop-target" : ""}`} style={{ "--quick-span": presentation.span, "--quick-mobile-span": presentation.mobileSpan } as CSSProperties} data-testid={`quick-bookmark-${node.id}`} data-quick-bookmark-id={node.id} data-quick-parent-id={parent.id} data-quick-bookmark-index={index} data-quick-bookmark-title={title} data-quick-span={presentation.span} draggable onDragStart={(event) => { setDragging(true); onDragStart(event, item, node.url); }} onDragEnd={() => { setDragging(false); onDragEnd(); }}>
       {editing && <span className="quick-access__drag" aria-hidden="true">⋮⋮</span>}
-      <a href={node.url} title={`${title}\n${node.url}`} onClick={(event) => { if (editing) { event.preventDefault(); return; } void openBookmarkLink(event, node.url, () => onRecentClick(node, parent, index)); }}>
+      <a href={node.url} draggable={true} title={`${title}\n${node.url}`} onDragStart={(event) => { event.stopPropagation(); setDragging(true); onDragStart(event, item, node.url); }} onClick={(event) => { if (editing) { event.preventDefault(); return; } void openBookmarkLink(event, node.url, () => onRecentClick(node, parent, index)); }}>
         <span className="quick-access__icon" aria-hidden="true">{!broken && node.url ? <img src={favicon(node.url, 64)} alt="" onError={() => setBroken(true)} /> : <span>{title.slice(0, 1).toUpperCase()}</span>}</span>
         <span><strong>{title}</strong><small>{host}</small></span>
       </a>
       {editing && <div className="quick-access__actions"><button className="icon-button" type="button" aria-label={t("action.editBookmark", { title })} title={t("editor.edit") + t("editor.bookmark")} onClick={() => onEdit({ id: node.id, parentId: parent.id, type: "bookmark", title, url: node.url || "", style: presentation.style, width: presentation.width, rows: presentation.rows, cardsContext: true })}><PencilSimple /></button><button className="icon-button" type="button" aria-label={t("action.moveBookmark", { title })} title={t("move.bookmark")} onClick={() => onMove(node)}><LinkSimple /></button><button className="icon-button danger" type="button" aria-label={t("action.deleteBookmark", { title })} title={t("action.deleteBookmark", { title: "" }).trim()} onClick={() => onDelete(node, parent.id, index)}><Trash /></button></div>}
     </article>
+    {hinted && hinted.after && placeholder}
   </Fragment>;
 }
 
@@ -82,7 +147,7 @@ type GridProps = Pick<Props, "config" | "editing" | "onEdit" | "onMove" | "onDel
   parent: BookmarkNode;
   links: BookmarkNode[];
   preview: QuickDropPreview | null;
-  onDragStart: (event: DragEvent, item: QuickDragItem) => void;
+  onDragStart: (event: DragEvent, item: QuickDragItem, url?: string) => void;
   onDragEnd: () => void;
   onPreview: (event: DragEvent, parent: BookmarkNode) => void;
   onDrop: (event: DragEvent) => void;
@@ -112,16 +177,20 @@ function QuickFolderGroup({ folder, parent, depth, preview, onDragStart, onDragE
   const parentId = folder.parentId || parent.id;
   const index = folder.index ?? (parent.children || []).indexOf(folder);
   const previewExternalDrop = (event: DragEvent) => {
-    if (!props.editing || !hasPageBookmarkDrag(event)) return;
+    if (!hasPageBookmarkDrag(event)) return;
     event.preventDefault(); event.stopPropagation(); setDropReady(true);
   };
   const dropExternalItem = async (event: DragEvent) => {
-    const raw = event.dataTransfer.getData(folderDragMime);
-    if (!props.editing || !raw) return;
+    const item = readPageBookmarkPayload(event);
+    if (!item?.id) return;
     event.preventDefault(); event.stopPropagation(); setDropReady(false);
     try {
-      const item = JSON.parse(raw) as { id?: string };
-      if (!item.id || item.id === folder.id) return;
+      if (item.id === folder.id) return;
+      // See FolderView.dropInto: this coarse handler only relocates a bookmark
+      // into a *different* folder. A reorder drag that lands off-target within
+      // this same folder's own grid should not fling the item to its end.
+      if (item.parentId === folder.id) { clearActiveDragItem(); return; }
+      clearActiveDragItem();
       await props.onMoveInto(item.id, folder.id, title);
     } catch { /* Invalid transfer data is ignored; source components own their drag payload. */ }
   };
@@ -140,6 +209,12 @@ export function QuickAccess({ folder, config, onConfig, editing, onToggleAll, on
   const t = createTranslator(config.language);
   const [dragItem, setDragItem] = useState<QuickDragItem | null>(null);
   const [preview, setPreview] = useState<QuickDropPreview | null>(null);
+  // Native dragover/drop can fire back-to-back within the same task, before React
+  // has committed the state update from the preceding dragover. onDrop reads this
+  // ref (updated synchronously) instead of the possibly-stale `preview` closure,
+  // so a drop right after the preview is set is never missed.
+  const previewRef = useRef<QuickDropPreview | null>(null);
+  const updatePreview = (value: QuickDropPreview | null) => { previewRef.current = value; setPreview(value); };
   const [rootDropReady, setRootDropReady] = useState(false);
   const [styleMenu, setStyleMenu] = useState(false);
   const styleMenuRef = useRef<HTMLDivElement>(null);
@@ -150,12 +225,22 @@ export function QuickAccess({ folder, config, onConfig, editing, onToggleAll, on
     return () => document.removeEventListener("pointerdown", close);
   }, [styleMenu]);
   useEffect(() => {
-    const clear = () => setRootDropReady(false);
-    document.addEventListener("dragend", clear, true);
-    document.addEventListener("drop", clear, true);
-    return () => { document.removeEventListener("dragend", clear, true); document.removeEventListener("drop", clear, true); };
+    // A page bookmark dragged across the shelf can raise a hint here, but its
+    // dragend fires on the FolderView item, never on a quick tile. Without
+    // clearing the hint too, dragging through and dropping elsewhere leaves a
+    // "放到这里" placeholder stranded in the grid.
+    // The capture-phase drop runs before the grid's own bubble handler, which
+    // still needs previewRef to complete the move, so that one only takes down
+    // the visual. dragend always follows the drop and can clear everything.
+    const clearVisual = () => { setRootDropReady(false); setPreview(null); };
+    const clearAll = () => { setRootDropReady(false); setDragItem(null); updatePreview(null); };
+    document.addEventListener("dragend", clearAll, true);
+    document.addEventListener("drop", clearVisual, true);
+    return () => { document.removeEventListener("dragend", clearAll, true); document.removeEventListener("drop", clearVisual, true); };
   }, []);
   const slots = useRef<QuickDropSlot[]>([]);
+  const slotCaptureSource = useRef<string | null>(null);
+  const slotScroll = useRef({ x: 0, y: 0 });
   const children = folder.children || [];
   // Quick Access is a shelf, not a regular folder card. Keep its outer frame
   // transparent by default while still allowing an explicit false value to
@@ -167,57 +252,100 @@ export function QuickAccess({ folder, config, onConfig, editing, onToggleAll, on
   const links = children.filter((child) => child.url);
   const folders = children.filter((child) => !child.url);
   const shared = { config, onConfig, editing, onEdit, onMove, onDelete, onNewBookmark, onNewFolder, onRecentClick, onMoveInto };
-  const onDragStart = (event: DragEvent, item: QuickDragItem) => {
-    if (!editing) return;
+  const captureQuickSlots = (sourceId: string) => {
+    slotScroll.current = { x: window.scrollX, y: window.scrollY };
+    slots.current = Array.from(document.querySelectorAll<HTMLElement>("[data-quick-bookmark-id]"), (element) => {
+      const rect = element.getBoundingClientRect();
+      return { targetId: element.dataset.quickBookmarkId || "", targetParentId: element.dataset.quickParentId || "", targetIndex: Number(element.dataset.quickBookmarkIndex || 0), targetTitle: element.dataset.quickBookmarkTitle || "", span: Number(element.dataset.quickSpan || 1), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    }).filter((slot) => slot.targetId && slot.targetParentId);
+    slotCaptureSource.current = sourceId;
+  };
+  const currentDragItem = (): QuickDragItem | null => {
+    const active = getActiveDragItem();
+    if (active?.type !== "bookmark" || !active.parentId) return null;
+    return { id: active.id, parentId: active.parentId, index: active.index, title: active.title || dragItem?.title || "" };
+  };
+  const onDragStart = (event: DragEvent, item: QuickDragItem, url?: string) => {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(quickDragMime, JSON.stringify(item));
     // Also expose the common payload. FolderView then accepts a quick entry as
     // a normal bookmark when it is dropped into any folder on the page.
     event.dataTransfer.setData(folderDragMime, JSON.stringify({ ...item, type: "bookmark" }));
-    slots.current = Array.from(document.querySelectorAll<HTMLElement>("[data-quick-bookmark-id]"), (element) => {
-      const rect = element.getBoundingClientRect();
-      return { targetId: element.dataset.quickBookmarkId || "", targetParentId: element.dataset.quickParentId || "", targetIndex: Number(element.dataset.quickBookmarkIndex || 0), targetTitle: element.dataset.quickBookmarkTitle || "", span: Number(element.dataset.quickSpan || 1), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-    }).filter((slot) => slot.targetId && slot.targetParentId);
-    setDragItem(item); setPreview(null);
+    if (url) {
+      event.dataTransfer.setData("text/uri-list", url);
+      event.dataTransfer.setData("text/plain", url);
+    }
+    setActiveDragItem({ ...item, type: "bookmark", source: "quick" });
+    captureQuickSlots(item.id);
+    setDragItem(item); updatePreview(null);
   };
-  const clearDrag = () => { setDragItem(null); setPreview(null); slots.current = []; window.dispatchEvent(new Event("xiangzi-folio-drag-end")); };
+  const clearDrag = () => {
+    clearActiveDragItem();
+    setDragItem(null); updatePreview(null); slots.current = []; slotCaptureSource.current = null; window.dispatchEvent(new Event("xiangzi-folio-drag-end"));
+  };
   const onPreview = (event: DragEvent, parent: BookmarkNode) => {
-    if (!editing || !dragItem) return;
+    const source = currentDragItem();
+    if (!source) return;
+    if (slotCaptureSource.current !== source.id) captureQuickSlots(source.id);
     event.preventDefault(); event.stopPropagation();
-    const target = slots.current.find((slot) => event.clientX >= slot.left && event.clientX < slot.right && event.clientY >= slot.top && event.clientY < slot.bottom);
-    if (!target || target.targetId === dragItem.id) {
+    const host = event.currentTarget as HTMLElement;
+    const x = event.clientX + window.scrollX - slotScroll.current.x;
+    const y = event.clientY + window.scrollY - slotScroll.current.y;
+    const target = slots.current.find((slot) => slot.targetParentId === parent.id && x >= slot.left && x < slot.right && y >= slot.top && y < slot.bottom);
+    const sameParent = source.parentId === parent.id;
+    if (!target || target.targetId === source.id) {
       const groupSlots = slots.current.filter((slot) => slot.targetParentId === parent.id);
       const finalRowTop = Math.max(...groupSlots.map((slot) => slot.top));
       const finalRow = groupSlots.filter((slot) => Math.abs(slot.top - finalRowTop) < 2);
       const finalRight = Math.max(...finalRow.map((slot) => slot.right));
       const finalBottom = Math.max(...finalRow.map((slot) => slot.bottom));
-      const isTail = groupSlots.length > 0 && (event.clientY >= finalBottom || (event.clientY >= finalRowTop && event.clientY < finalBottom && event.clientX >= finalRight));
-      if (isTail) {
-        setPreview({ ...dragItem, targetId: `tail-${parent.id}`, targetParentId: parent.id, targetIndex: (parent.children || []).length, targetTitle: t("common.groupEnd"), span: Math.max(1, Math.round(dragItem.index >= 0 ? slots.current.find((slot) => slot.targetId === dragItem.id)?.span || 1 : 1)) });
+      const isTail = groupSlots.length > 0 && (y >= finalBottom || (y >= finalRowTop && y < finalBottom && x >= finalRight));
+      const tailIndex = (parent.children || []).length;
+      if (isTail && !quickIsNoop(tailIndex, source.index, sameParent)) {
+        updatePreview({ ...source, targetId: `tail-${parent.id}`, targetParentId: parent.id, targetIndex: tailIndex, targetTitle: t("common.groupEnd"), after: false, indicator: quickTailIndicatorFor(host), span: Math.max(1, Math.round(source.index >= 0 ? slots.current.find((slot) => slot.targetId === source.id)?.span || 1 : 1)) });
         return;
       }
-      setPreview(null); return;
+      updatePreview(null); return;
     }
-    setPreview({ ...dragItem, ...target });
+    const after = quickIsAfter(target, slots.current, x, y);
+    if (quickIsNoop(quickInsertionIndex(target.targetIndex, after), source.index, sameParent)) { updatePreview(null); return; }
+    updatePreview({ ...source, ...target, after, indicator: quickIndicatorFor(host, target.targetId, after, quickSharesRow(target, slots.current)) });
   };
   const onDrop = async (event: DragEvent) => {
-    if (!dragItem || !preview) return;
+    const source = currentDragItem();
+    if (!source) return;
+    const target = previewRef.current;
+    if (!target) {
+      // A drag that began inside the shelf has to be swallowed here even with
+      // no active hint. Suppressed no-op positions produce a null preview, and
+      // letting those bubble hands the drop to the section's "move into quick
+      // access" handler, which re-appends the item to the end of the shelf.
+      // A page bookmark still falls through: that append is its intended path.
+      if (getActiveDragItem()?.source === "quick") { event.preventDefault(); event.stopPropagation(); clearDrag(); }
+      return;
+    }
     event.preventDefault(); event.stopPropagation();
-    const targetIndex = dragItem.parentId === preview.targetParentId && dragItem.index < preview.targetIndex ? preview.targetIndex - 1 : preview.targetIndex;
+    const sameParent = source.parentId === target.targetParentId;
+    const insertAt = quickInsertionIndex(target.targetIndex, target.after);
     clearDrag();
-    await onReorder(dragItem.id, preview.targetParentId, targetIndex, dragItem.title);
+    if (quickIsNoop(insertAt, source.index, sameParent)) return;
+    await onReorder(source.id, target.targetParentId, sameParent && source.index < insertAt ? insertAt - 1 : insertAt, source.title);
   };
   const previewRootDrop = (event: DragEvent) => {
-    if (!editing || isQuickBookmarkDrag(event) || !hasPageBookmarkDrag(event)) return;
+    if (isQuickBookmarkDrag(event) || !hasPageBookmarkDrag(event)) return;
     event.preventDefault(); event.stopPropagation(); setRootDropReady(true);
   };
   const dropIntoRoot = async (event: DragEvent) => {
-    const raw = event.dataTransfer.getData(folderDragMime);
-    if (!editing || !raw) return;
+    const item = readPageBookmarkPayload(event);
+    if (!item?.id) return;
     event.preventDefault(); event.stopPropagation(); setRootDropReady(false);
     try {
-      const item = JSON.parse(raw) as { id?: string };
-      if (!item.id || item.id === folder.id) return;
+      if (item.id === folder.id) return;
+      // See FolderView.dropInto: only relocates into a *different* folder. A
+      // shelf-internal reorder that misses the grid and lands on the shelf's
+      // own background should not fling the tile to the end of the shelf.
+      if (item.parentId === folder.id) { clearActiveDragItem(); return; }
+      clearActiveDragItem();
       await onMoveInto(item.id, folder.id, t("quick.title"));
     } catch { /* Invalid transfer data is ignored; source components own their drag payload. */ }
   };

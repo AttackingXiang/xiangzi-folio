@@ -225,6 +225,29 @@ function decodeBookmarkMarker(value: string) {
   return { marker: style, width, rows: (code & 64) ? 2 as const : 1 as const };
 }
 
+// Peels one valid trailing marker, or returns null when the tail is not a
+// marker this build understands. Only decodable suffixes are removed, so a
+// title a user really typed as "备份~ab" keeps its own text.
+function stripOneTrailingMarker(value: string): string | null {
+  if (decodeShortMarker(value)) return value.replace(shortMarkerPattern, "");
+  const compact = decodeCompactMarker(value);
+  if (compact.marker || compact.width || compact.collapsed) return value.replace(compactMarkerPattern, "");
+  const bookmark = decodeBookmarkMarker(value);
+  if (bookmark.marker || bookmark.width || bookmark.rows === 2) return value.replace(bookmarkMarkerPattern, "");
+  return null;
+}
+
+// Titles can accumulate more than one marker: any build that failed to decode
+// the suffix already present appended a second one instead of replacing it
+// ("常用入口~1r~1r"). The tail marker wins for presentation, but every marker
+// has to come off the display name or the stale ones leak into the UI. Writers
+// go through here too, so the next style edit rewrites the title clean.
+function stripTrailingMarkers(value: string): string {
+  let result = value;
+  for (let next = stripOneTrailingMarker(result); next !== null; next = stripOneTrailingMarker(result)) result = next;
+  return result;
+}
+
 type ParsedPresentationTitle = { title: string; marker?: PresentationMarker; width?: PresentationWidth; collapsed?: boolean; rows?: 1 | 2; role?: FolderRole };
 // Pure function of `value`, but called repeatedly for the same node across
 // nested renders (folder style calc, each LinkItem, countLinks display, drag
@@ -254,7 +277,7 @@ function computePresentationTitle(value: string): ParsedPresentationTitle {
   const widthValue = Number(tokens.find((token) => token.startsWith("w"))?.slice(1));
   const hasBookmarkMarker = tokens.some((token) => ["featured", "tile", "compact"].includes(token));
   const width = short?.width || compact.width || bookmarkCompact.width || ((hasBookmarkMarker || bookmarkCompact.marker || bookmarkCompact.width || bookmarkCompact.rows) && validBookmarkWidths.has(widthValue) ? widthValue as PresentationWidth : validWidths.has(widthValue) ? widthValue as PresentationWidth : undefined);
-  const title = value.replace(markerPattern, " ").replace(short ? shortMarkerPattern : /$^/, "").replace(hasCompact ? compactMarkerPattern : /$^/, "").replace(hasBookmarkCompact ? bookmarkMarkerPattern : /$^/, "").replace(/\s+/g, " ").trim() || "未命名";
+  const title = stripTrailingMarkers(value.replace(markerPattern, " ")).replace(/\s+/g, " ").trim() || "未命名";
   const collapsed = short?.collapsed || compact.collapsed || tokens.includes("closed");
   const rows = short?.rows || bookmarkCompact.rows;
   return { title, ...(marker ? { marker } : {}), ...(width ? { width } : {}), ...(collapsed ? { collapsed: true } : {}), ...(rows === 2 ? { rows } : {}), ...(short?.role ? { role: short.role } : {}) };

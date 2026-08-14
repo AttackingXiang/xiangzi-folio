@@ -155,9 +155,11 @@ a { color: inherit; }
    per tile: N separate blurred compositing layers cost noticeably more than
    one blurred rect with flat-ish translucent cards painted on top, and it
    scales with the number of quick-access entries. */
-.quick-access__grid { display: grid; grid-template-columns: repeat(10,minmax(0,1fr)); gap: 12px; padding: 7px; border: 1px solid color-mix(in srgb,var(--theme-border) 78%,transparent); border-radius: 18px; background: color-mix(in srgb,var(--quick-surface,var(--surface)) 32%,transparent); backdrop-filter: blur(var(--glass-blur)) saturate(135%); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(135%); }
-.quick-access__item,.quick-access__drop-placeholder { min-width: 0; position: relative; grid-column: span var(--quick-span,2); }
+.quick-access__grid { position: relative; display: grid; grid-template-columns: repeat(10,minmax(0,1fr)); gap: 12px; padding: 7px; border: 1px solid color-mix(in srgb,var(--theme-border) 78%,transparent); border-radius: 18px; background: color-mix(in srgb,var(--quick-surface,var(--surface)) 32%,transparent); backdrop-filter: blur(var(--glass-blur)) saturate(135%); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(135%); }
+.quick-access__item { min-width: 0; position: relative; grid-column: span var(--quick-span,2); }
 .quick-access__item > a { min-width: 0; min-height: 76px; display: flex; align-items: center; gap: 12px; padding: 12px 15px; border: 1px solid color-mix(in srgb,var(--theme-border) 85%,transparent); border-radius: 16px; color: var(--ink); background: color-mix(in srgb,var(--quick-surface,var(--surface)) 88%,transparent); box-shadow: 0 9px 22px rgba(12,24,35,.09), inset 0 1px 0 rgba(255,255,255,.12); text-decoration: none; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
+.quick-access__item[draggable="true"] > a { cursor: grab; }
+.quick-access__item[draggable="true"]:active > a { cursor: grabbing; }
 .quick-access__item > a:hover { transform: translateY(-2px); background: var(--surface-strong); box-shadow: 0 15px 32px color-mix(in srgb,var(--quick-color,var(--accent)) 13%,transparent); }
 .quick-access__item.is-editing > a { padding-right: 42px; }
 .quick-access__item.is-drop-target > a { outline: 2px solid color-mix(in srgb,var(--accent) 68%,transparent); outline-offset: 2px; }
@@ -172,7 +174,12 @@ a { color: inherit; }
 .quick-access__actions { position: absolute; top: 50%; right: 5px; z-index: 2; display: flex; flex-direction: column; transform: translateY(-50%); padding: 2px; border-radius: 10px; background: color-mix(in srgb,var(--surface-strong) 94%,transparent); box-shadow: 0 5px 16px rgba(10,18,35,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .quick-access__actions .icon-button { width: 27px; height: 27px; }
 .quick-access__drag { position: absolute; top: 7px; left: 6px; z-index: 2; color: color-mix(in srgb,var(--muted) 72%,transparent); font-size: 11px; letter-spacing: -3px; line-height: 1; cursor: grab; }.quick-access__drag:active { cursor: grabbing; }
-.quick-access__drop-placeholder { min-height: 70px; display: grid; place-items: center; border: 1px dashed color-mix(in srgb,var(--accent) 72%,transparent); border-radius: 16px; color: var(--accent); background: color-mix(in srgb,var(--accent) 8%,transparent); font-size: 11px; font-weight: 780; }
+/* Out-of-flow insertion bar — see .bookmark-drop-placeholder for the rationale.
+   pointer-events must also stay off: the hint sits under the cursor mid-drag,
+   and letting it take hits makes the pointer land on a non-slot, which clears
+   the hint, which brings the pointer back — a flicker loop. */
+.quick-access__drop-placeholder { position: absolute; z-index: 6; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent), 0 2px 8px color-mix(in srgb,var(--accent) 45%,transparent); pointer-events: none; animation: bookmark-slot-in .12s ease-out; }
+.quick-access__drop-placeholder span { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .quick-folder-group { position: relative; margin-top: 21px; margin-left: calc(var(--quick-depth,0) * 16px); }
 .quick-folder-group > header { min-height: 33px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 3px 7px; }
 .quick-folder-group > header > div:first-child { min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 780; }
@@ -222,7 +229,11 @@ a { color: inherit; }
 .folder.is-borderless.folder--nested > .folder__body { border-left-color: transparent; }
 .folder.is-borderless .folder--nested > .folder__body { border-left-color: transparent; }
 .folder__header { min-height: 64px; display: flex; align-items: center; padding: 9px 14px 9px 17px; border-bottom: 1px solid var(--line); position: relative; }
-.folder__drag { width: 20px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; color: color-mix(in srgb,var(--muted) 72%,transparent); cursor: grab; }
+.folder__drag { width: 20px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; color: color-mix(in srgb,var(--muted) 72%,transparent); cursor: grab; opacity: 0; transition: opacity .15s ease; }
+/* Folders reorder at any time, like bookmarks do. Outside edit mode the handle
+   stays out of the way until the folder is hovered or it takes focus. */
+.folder:hover > .folder__header > .folder__drag,.folder__drag:focus-visible { opacity: 1; }
+.folder.is-organizing > .folder__header > .folder__drag,.folder__header:has(.folder__actions) > .folder__drag { opacity: 1; }
 .folder__drag:active { cursor: grabbing; }
 .folder__drag svg { width: 14px; height: 14px; }
 .folder--nested > .folder__header { min-height: 38px; padding: 4px 4px 4px 0; border-bottom-color: color-mix(in srgb,var(--line) 70%,transparent); }
@@ -259,7 +270,7 @@ a { color: inherit; }
 .folder:has(> .folder__header):hover > .folder__header .drop-hint { opacity: .7; }
 .folder__body { padding: 10px 15px 15px; }
 .folder--nested > .folder__body { padding: 3px 0 4px 17px; border-left: 1px solid color-mix(in srgb,var(--accent) 25%,transparent); }
-.directory-grid, .folder-groups { display: grid; grid-template-columns: repeat(var(--page-columns,12),minmax(0,1fr)); gap: 6px 8px; }
+.directory-grid, .folder-groups { position: relative; display: grid; grid-template-columns: repeat(var(--page-columns,12),minmax(0,1fr)); gap: 6px 8px; }
 .folder-groups { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); }
 .directory-grid > .bookmark, .folder-groups > .bookmark, .icon-grid > .bookmark, .mixed-grid > .bookmark, .focus-list > .bookmark { grid-column: span var(--item-span,12); }
 .directory-grid > .folder--nested, .folder-groups > .folder--nested { grid-column: span var(--folder-span,12); min-width: 0; }
@@ -273,6 +284,11 @@ a { color: inherit; }
 .bookmark { min-width: 0; position: relative; border-radius: 10px; transition: background .15s ease, transform .15s ease; }
 .bookmark:hover { background: color-mix(in srgb,var(--accent) 7%,transparent); }
 .bookmark[draggable="true"] { cursor: grab; }
+.bookmark[draggable="true"] .bookmark__link { cursor: grab; }
+.bookmark[draggable="true"]:active, .bookmark[draggable="true"]:active .bookmark__link { cursor: grabbing; }
+/* The item being dragged recedes so the placeholder reads as its new home. */
+.bookmark.is-dragging { opacity: .4; }
+.quick-access__item.is-dragging { opacity: .4; }
 .bookmark__link { min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 43px; padding: 7px 7px; color: inherit; text-decoration: none; border-radius: inherit; }
 .favicon { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border: 1px solid color-mix(in srgb,var(--line) 70%,transparent); border-radius: 9px; overflow: hidden; background: var(--favicon-surface,color-mix(in srgb,var(--ink) 7%,var(--surface-strong))); color: var(--muted); font-size: 10px; font-weight: 850; box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
 .favicon img { width: 18px; height: 18px; object-fit: contain; }
@@ -290,11 +306,13 @@ a { color: inherit; }
 .bookmark__drag { position: absolute; left: 1px; top: 50%; z-index: 2; width: 18px; height: 26px; transform: translateY(-50%); display: grid; place-items: center; color: color-mix(in srgb,var(--muted) 68%,transparent); cursor: grab; }
 .bookmark__drag svg { width: 13px; }
 .bookmark.is-drop-target { outline: 1px solid color-mix(in srgb,var(--accent) 48%,transparent); background: color-mix(in srgb,var(--accent) 6%,var(--surface-soft)); transform: translateY(2px); }
-.bookmark-drop-placeholder { min-height: 43px; z-index: 6; display: grid; place-items: center; border: 1.5px dashed color-mix(in srgb,var(--accent) 74%,transparent); border-radius: 10px; background: color-mix(in srgb,var(--accent) 12%,var(--surface-soft)); color: color-mix(in srgb,var(--accent) 86%,var(--ink)); pointer-events: none; animation: bookmark-slot-in .14s ease-out; }
-.bookmark-drop-placeholder span { font-size: 10px; font-weight: 800; letter-spacing: .03em; }
-.bookmark-drop-placeholder.bookmark--tile { min-height: 72px; }
-.bookmark-drop-placeholder.bookmark--featured { min-height: 96px; }
-.bookmark-drop-placeholder.bookmark--dock { min-width: 96px; min-height: 58px; }
+/* An insertion bar, not a block: absolute positioning keeps it out of flow so
+   showing it never reflows the grid. That is what lets the drop hint sit
+   exactly where the cursor points — an in-flow placeholder pushes the item
+   under the cursor aside the moment it appears. Geometry comes from inline
+   styles computed against the grid in FolderView.edgeIndicator. */
+.bookmark-drop-placeholder { position: absolute; z-index: 6; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent), 0 2px 8px color-mix(in srgb,var(--accent) 45%,transparent); pointer-events: none; animation: bookmark-slot-in .12s ease-out; }
+.bookmark-drop-placeholder span { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @keyframes bookmark-slot-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 .folder-drop-overlay { position: absolute; inset: 5px; z-index: 12; display: grid; place-content: center; justify-items: center; gap: 3px; border: 1.5px dashed color-mix(in srgb,var(--accent) 78%,transparent); border-radius: calc(var(--radius) - 2px); background: color-mix(in srgb,var(--accent) 17%,var(--surface-strong)); color: var(--accent); pointer-events: none; backdrop-filter: blur(5px); }
 .folder-drop-overlay svg { width: 22px; height: 22px; }
@@ -308,7 +326,7 @@ a { color: inherit; }
 .bookmark--compact .favicon { width: 18px; height: 18px; flex-basis: 18px; border-radius: 5px; }
 .bookmark--compact .favicon img { width: 12px; height: 12px; }
 
-.icon-grid, .mixed-grid, .focus-list { display: grid; grid-template-columns: repeat(var(--page-columns,12),minmax(0,1fr)); gap: 8px; }
+.icon-grid, .mixed-grid, .focus-list { position: relative; display: grid; grid-template-columns: repeat(var(--page-columns,12),minmax(0,1fr)); gap: 8px; }
 .icon-grid { grid-template-columns: repeat(calc(var(--page-columns,12) * 2),minmax(0,1fr)); }
 .icon-grid > .bookmark { grid-column: span calc(var(--item-span, 2) * 2); }
 .bookmark--tile .bookmark__link { min-height: 72px; flex-direction: column; justify-content: center; gap: 7px; padding: 8px 5px; text-align: center; }
@@ -321,14 +339,14 @@ a { color: inherit; }
 .bookmark--featured .favicon { width: 38px; height: 38px; flex-basis: 38px; border-radius: 11px; background: var(--surface-strong); }
 .bookmark--featured .favicon img { width: 23px; height: 23px; }
 .bookmark--featured .bookmark__copy strong { font-family: Georgia,"Songti SC",serif; font-size: 15px; }
-.dock-list { display: flex; gap: 7px; overflow-x: auto; padding: 2px 1px 6px; scrollbar-width: thin; }
+.dock-list { position: relative; display: flex; gap: 7px; overflow-x: auto; padding: 2px 1px 6px; scrollbar-width: thin; }
 .bookmark--dock { min-width: 96px; background: var(--surface-soft); border: 1px solid var(--line); }
 .bookmark--dock .bookmark__link { min-height: 58px; flex-direction: column; justify-content: center; gap: 5px; text-align: center; }
 .bookmark--dock .bookmark__copy { display: block; width: 100%; }
 .bookmark--dock .favicon { width: 26px; height: 26px; flex-basis: 26px; }
 .bookmark--tall { min-height: 128px; grid-row: span 2; }
 .bookmark--tall .bookmark__link { min-height: 128px; align-items: center; }
-.cards-grid { display: grid; grid-template-columns: repeat(calc(var(--page-columns,12) * 2),minmax(0,1fr)); gap: 12px; }
+.cards-grid { position: relative; display: grid; grid-template-columns: repeat(calc(var(--page-columns,12) * 2),minmax(0,1fr)); gap: 12px; }
 .cards-grid > .bookmark { grid-column: span calc(var(--item-span, 3) * 2); }
 .bookmark--card { border-radius: 18px; }
 .bookmark--card .bookmark__link { min-height: 76px; padding: 12px 15px; border: 1px solid color-mix(in srgb,var(--line) 50%,transparent); border-radius: 18px; background: var(--quick-surface,var(--surface)); box-shadow: 0 10px 26px rgba(42,67,62,.06); transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
@@ -460,7 +478,7 @@ a { color: inherit; }
   .edit-entry { width: 39px; padding: 0; font-size: 0; }.edit-entry svg { width: 17px; }
   .editbar { top: 80px; width: calc(100% - 16px); padding: 8px; display: block; }.editbar__mode { border: 0; padding: 0; justify-content: space-between; }.editbar__tools { margin-top: 6px; gap: 1px; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }.editbar__tools::-webkit-scrollbar { display: none; }.editbar__tools > button,.editbar__tools > .editbar__data { flex: 0 0 auto; }.editbar__tools button,.editbar__data summary { padding-inline: 6px; white-space: nowrap; font-size: 10px; }
   .content { width: calc(100% - 22px); padding-top: 24px; }
-  .quick-access { margin-bottom: 16px; padding: 6px 5px 8px; }.quick-access > header small { display: none; }.quick-access__tools { overflow-x: auto; scrollbar-width: none; }.quick-access__tools::-webkit-scrollbar { display: none; }.quick-access__tools button { flex: 0 0 auto; padding-inline: 7px; }.quick-access__grid { grid-template-columns: repeat(10,minmax(0,1fr)); gap: 8px; padding: 5px; }.quick-access__item,.quick-access__drop-placeholder { grid-column: span var(--quick-mobile-span,5); }.quick-access__item > a { min-height: 66px; padding: 10px 12px; }.quick-access__icon { width: 36px; height: 36px; flex-basis: 36px; }.quick-folder-group { margin-top: 17px; margin-left: calc(var(--quick-depth,0) * 10px); }
+  .quick-access { margin-bottom: 16px; padding: 6px 5px 8px; }.quick-access > header small { display: none; }.quick-access__tools { overflow-x: auto; scrollbar-width: none; }.quick-access__tools::-webkit-scrollbar { display: none; }.quick-access__tools button { flex: 0 0 auto; padding-inline: 7px; }.quick-access__grid { grid-template-columns: repeat(10,minmax(0,1fr)); gap: 8px; padding: 5px; }.quick-access__item { grid-column: span var(--quick-mobile-span,5); }.quick-access__item > a { min-height: 66px; padding: 10px 12px; }.quick-access__icon { width: 36px; height: 36px; flex-basis: 36px; }.quick-folder-group { margin-top: 17px; margin-left: calc(var(--quick-depth,0) * 10px); }
   .bookmark-search-results { left: -46px; right: -47px; }
   .bookmark-grid { column-gap: 11px; row-gap: 18px; }.block-wrap { grid-column: span 12 !important; }.width-presets { display: none; }
   .icon-grid { grid-template-columns: repeat(6,minmax(0,1fr)); gap: 7px; }.icon-grid > .bookmark { grid-column: span 2; }.bookmark--tile .bookmark__link { min-height: 82px; padding-inline: 3px; }.bookmark--tile .bookmark__copy strong { font-size: 12px; }
