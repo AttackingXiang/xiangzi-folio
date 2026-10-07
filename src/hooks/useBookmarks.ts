@@ -3,6 +3,10 @@ import { bookmarks } from "../lib/bookmarks";
 import { loadCache, saveCache } from "../lib/config";
 import type { BookmarkNode } from "../types";
 
+// Non-Error rejections carry no localizable message of their own; the caller
+// translates this sentinel instead of a hardcoded-language fallback string.
+export const unknownBookmarkError = "__unknown_bookmark_error__";
+
 export function useBookmarks() {
   const [tree, setTree] = useState<BookmarkNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,7 +21,7 @@ export function useBookmarks() {
       const next = await bookmarks.getTree();
       freshLoaded.current = true;
       setTree(next); await saveCache(next); setError("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "读取书签失败"); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : unknownBookmarkError); }
     finally { setLoading(false); }
   }, []);
 

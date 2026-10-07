@@ -11,7 +11,7 @@ When implementing from a selected generated mock, treat that image as the source
 - React + TypeScript Chrome MV3 extension, new-tab override, local-first and no Google sign-in requirement.
 - Chrome native bookmarks are the content source of truth. Per-folder and per-bookmark presentation metadata is stored in a compact, portable title suffix; page theme, background, brand, and global layout preferences remain local and can be exported.
 - Default view shows all bookmarks recursively and supports collapsible nested folders.
-- Editing is hidden by default. One unified edit mode handles page layout and native bookmark organization; right-click menus are not part of the interaction model.
+- Editing is hidden by default. One unified edit mode handles page layout controls, inline edit/delete/style affordances, and right-click menus are not part of the interaction model. Drag-to-reorder and drag-to-move for bookmarks and folders is intentionally available at any time, not gated behind entering edit mode — only the surrounding edit UI (buttons, style menus, add/delete) is hidden outside edit mode.
 - Top search is a web search/address field, defaulting to Google.
 - Visual priority: modern lightweight interface with optional glassmorphism, background images, paper and night themes.
 - The default homepage visual source of truth is the light Xiangzi Folio reference: cream-to-mint ambient background, translucent white surfaces, violet accent, compact top search bar, understated root tabs, and spacious rounded folder cards. Avoid dense dark dashboard styling as the default.

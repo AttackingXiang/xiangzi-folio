@@ -10,7 +10,7 @@ import { FolderView, ResizeHandle } from "./components/FolderView";
 import { QuickAccess } from "./components/QuickAccess";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SupportDialog } from "./components/SupportDialog";
-import { useBookmarks } from "./hooks/useBookmarks";
+import { unknownBookmarkError, useBookmarks } from "./hooks/useBookmarks";
 import { allFolders, bookmarks, exportBookmarksHtml, folderStyleOptions, getRootFolders, importBundle, importHtml, isQuickAccessFolder, parsePresentationTitle, resolveFolderStyle, restoreBookmarkBranch, setBookmarkPresentationTitle, setFolderPresentationTitle, setQuickAccessTitle } from "./lib/bookmarks";
 import { createBundle, defaultConfig, downloadText, loadConfig, parseBundle, saveConfig } from "./lib/config";
 import { createTranslator, resolveLanguage } from "./lib/i18n";
@@ -39,7 +39,9 @@ function flattenBlocks(roots: BookmarkNode[]): BookmarkNode[] {
   // when every visible link came from a secondary root. `||` would treat that
   // real zero as "unknown" and substitute the cross-root link count instead,
   // landing the append at the wrong native index.
-  const direct = links.length ? { id: "direct-all", parentId: roots[0]?.id, title: "快捷书签", children: links, virtualParentChildCount: roots[0]?.children?.length ?? links.length } : null;
+  // Title is resolved via i18n in FolderView (this virtual block has no real
+  // Chrome bookmark title to carry), not hardcoded here.
+  const direct = links.length ? { id: "direct-all", parentId: roots[0]?.id, title: "", children: links, virtualParentChildCount: roots[0]?.children?.length ?? links.length } : null;
   return [...(direct ? [direct] : []), ...roots.flatMap((root) => (root.children || []).filter((item) => !item.url && !isQuickAccessFolder(item)))];
 }
 
@@ -489,7 +491,7 @@ export function App() {
         ? <QuickAccess folder={quickFolder} config={config} onConfig={onConfig} editing={editing} onToggleAll={toggleAll} onEdit={setEditor} onMove={(node) => setMoveTarget(node)} onDelete={deleteNode} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onReorder={reorderQuickBookmark} onMoveInto={moveItemIntoQuickFolder} onStyle={(style) => pinFolder(quickFolder, true, style)} onUnpin={() => pinFolder(quickFolder, false, "cards")} />
         : <div className="pinned-block"><FolderView node={quickFolder} block pinned pageSpan={12} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onTogglePinned={(node, pin) => pinFolder(node, pin)} /></div>
       )}
-      {error && <div className="error-banner">{error}<button onClick={refresh}>{t("app.retry")}</button></div>}
+      {error && <div className="error-banner">{error === unknownBookmarkError ? t("app.loadError") : error}<button onClick={refresh}>{t("app.retry")}</button></div>}
       {!loading && blocks.length === 0 && <div className="empty-state glass-surface"><img className="product-mark product-mark--empty" src={productMark} alt="" /><h2>{t("app.emptyTitle")}</h2><p>{t("app.emptyHint")}</p><button className="button button--primary" onClick={() => setEditing(true)}>{t("app.start")}</button></div>}
       <div className={`bookmark-grid ${editing ? "is-layout-editing" : ""}`}>
         {editing && <div className="grid-guide" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span key={index} />)}</div>}
@@ -499,7 +501,8 @@ export function App() {
           const configuredWidth = config.markerStorageVersion >= 3 ? parsedBlock.width || config.folderWidths[block.id] : config.folderWidths[block.id] || parsedBlock.width;
           const width = Math.max(3, Math.min(12, configuredWidth || (blockStyle === "directory" ? 4 : blocks.length <= 2 ? 6 : 4)));
           const selected = editing && selectedBlock === block.id;
-          return <MasonryArticle key={block.id} width={width} tabIndex={editing ? 0 : undefined} aria-label={editing ? t("app.selectAria", { title: parsedBlock.title }) : undefined} className={`block-wrap ${selected ? "is-selected" : ""} ${draggedBlock === block.id ? "is-dragging" : ""}`} draggable={editing} onClick={() => editing && setSelectedBlock(block.id)} onFocus={() => editing && setSelectedBlock(block.id)} onDragStart={(event) => { setSelectedBlock(block.id); setDraggedBlock(block.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedBlock(null)} onDragOver={(event) => editing && event.preventDefault()} onDrop={(event) => moveBlock(event, block.id)}>
+          const blockTitle = block.id.startsWith("direct-") ? t("folder.directTitle") : parsedBlock.title;
+          return <MasonryArticle key={block.id} width={width} tabIndex={editing ? 0 : undefined} aria-label={editing ? t("app.selectAria", { title: blockTitle }) : undefined} className={`block-wrap ${selected ? "is-selected" : ""} ${draggedBlock === block.id ? "is-dragging" : ""}`} draggable={editing} onClick={() => editing && setSelectedBlock(block.id)} onFocus={() => editing && setSelectedBlock(block.id)} onDragStart={(event) => { setSelectedBlock(block.id); setDraggedBlock(block.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedBlock(null)} onDragOver={(event) => editing && event.preventDefault()} onDrop={(event) => moveBlock(event, block.id)}>
             {selected ? <div className="block-toolbar"><span className="drag-label"><SquaresFour />{t("app.drag")}</span><div className="width-presets">{widthPresets.map((preset) => { const label = preset.key ? t(preset.key) : preset.label!; return <button type="button" key={preset.value} className={width === preset.value ? "active" : ""} title={`${label} · ${preset.value}/12`} onClick={(event) => { event.stopPropagation(); commitBlockWidth(block, preset.value); }}>{label}</button>; })}</div></div> : editing && <button type="button" className="block-select" title={t("app.selectAdjust")} onClick={() => setSelectedBlock(block.id)}>{t("app.selectAdjust")}</button>}
             <FolderView node={block} block pageSpan={width} config={config} editing={editing} onConfig={onConfig} onEdit={setEditor} onRefresh={refresh} onToast={notify} onDelete={deleteNode} onMove={(node) => setMoveTarget(node)} onNewFolder={(parentId) => setEditor({ parentId, type: "folder", title: "", url: "", folderStyle: "icons", width: 4 })} onNewBookmark={(parentId, defaults) => setEditor({ parentId, type: "bookmark", title: "", url: "", ...defaults })} onRecentClick={moveRecentBookmarkToFront} onTogglePinned={(node, pin) => pinFolder(node, pin)} />
             {selected && <ResizeHandle width={width} language={config.language} onWidth={(next) => onConfig((value) => ({ ...value, folderWidths: { ...value.folderWidths, [block.id]: next } }))} onCommit={(next) => commitBlockWidth(block, next)} />}
